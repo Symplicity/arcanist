@@ -88,6 +88,8 @@ phutil_register_library_map(array(
     'PhutilModuleRequirements' => 'parser/phutilmodule',
     'PhutilUnitTestEngine' => 'unit/engine/phutil',
     'PhutilUnitTestEngineTestCase' => 'unit/engine/phutil/__tests__',
+    'SympArcanistLintEngine' => 'lint/engine/symp',
+    'SympXHPASTLinter' => 'lint/linter/symp',
     'UnitTestableArcanistLintEngine' => 'lint/engine/test',
   ),
   'function' =>
@@ -144,6 +146,8 @@ phutil_register_library_map(array(
     'PhutilLintEngine' => 'ArcanistLintEngine',
     'PhutilUnitTestEngine' => 'ArcanistBaseUnitTestEngine',
     'PhutilUnitTestEngineTestCase' => 'ArcanistPhutilTestCase',
+    'SympArcanistLintEngine' => 'ArcanistLintEngine',
+    'SympXHPASTLinter' => 'ArcanistLinter',
     'UnitTestableArcanistLintEngine' => 'ArcanistLintEngine',
   ),
   'requires_interface' =>
