@@ -15,7 +15,7 @@ class SympArcanistLintEngine extends ArcanistLintEngine {
     $xhpast_linter = new SympXHPASTLinter();
     $linters[] = $xhpast_linter;
     foreach ($paths as $path) {
-      if (preg_match('/\.php$/', $path)) {
+      if (preg_match('/\.(php|class|inc)$/', $path)) {
         $xhpast_linter->addPath($path);
         $xhpast_linter->addData($path, $this->loadData($path));
       }
