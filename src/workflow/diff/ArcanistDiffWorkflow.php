@@ -549,8 +549,10 @@ EOTEXT
     }
 
     if ($repository_api instanceof ArcanistMercurialAPI) {
-      // TODO: This is unlikely to be correct since it excludes using local
-      // branching in Mercurial.
+      return true;
+    }
+
+    if ($this->isHistoryImmutable()) {
       return true;
     }
 
@@ -603,16 +605,9 @@ EOTEXT
         }
       }
 
-    } else if ($repository_api instanceof ArcanistGitAPI) {
-      $this->parseGitRelativeCommit(
-        $repository_api,
+    } else if ($repository_api->supportsRelativeLocalCommits()) {
+      $repository_api->parseRelativeLocalCommit(
         $this->getArgument('paths', array()));
-      $paths = $repository_api->getWorkingCopyStatus();
-    } else if ($repository_api instanceof ArcanistMercurialAPI) {
-      // TODO: Unify this and the previous block.
-
-      // TODO: Parse the relative commit.
-
       $paths = $repository_api->getWorkingCopyStatus();
     } else {
       throw new Exception("Unknown VCS!");
@@ -1117,7 +1112,10 @@ EOTEXT
       }
       $lint_workflow = $this->buildChildWorkflow('lint', $argv);
 
-      $lint_workflow->setShouldAmendChanges(true);
+      if (!$this->isHistoryImmutable()) {
+        // TODO: We should offer to create a checkpoint commit.
+        $lint_workflow->setShouldAmendChanges(true);
+      }
 
       $lint_result = $lint_workflow->run();
 

@@ -159,4 +159,25 @@ abstract class ArcanistRepositoryAPI {
   abstract public function getCurrentFileData($path);
   abstract public function getLocalCommitInformation();
 
+
+  abstract public function supportsRelativeLocalCommits();
+
+  public function parseRelativeLocalCommit(array $argv) {
+    throw new ArcanistCapabilityNotSupportedException($this);
+  }
+
+  public function getAllLocalChanges() {
+    throw new ArcanistCapabilityNotSupportedException($this);
+  }
+
+  abstract public function supportsLocalBranchMerge();
+
+  public function performLocalBranchMerge($branch, $message) {
+    throw new ArcanistCapabilityNotSupportedException($this);
+  }
+
+  public function getFinalizedRevisionMessage() {
+    throw new ArcanistCapabilityNotSupportedException($this);
+  }
+
 }

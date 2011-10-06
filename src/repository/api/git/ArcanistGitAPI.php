@@ -512,4 +512,62 @@ class ArcanistGitAPI extends ArcanistRepositoryAPI {
     return trim($owner);
   }
 
+  public function supportsRelativeLocalCommits() {
+    return true;
+  }
+
+  public function parseRelativeLocalCommit(array $argv) {
+    if (count($argv) == 0) {
+      return;
+    }
+    if (count($argv) != 1) {
+      throw new ArcanistUsageException("Specify only one commit.");
+    }
+    $base = reset($argv);
+    if ($base == ArcanistGitAPI::GIT_MAGIC_ROOT_COMMIT) {
+      $merge_base = $base;
+    } else {
+      list($err, $merge_base) = exec_manual(
+        '(cd %s; git merge-base %s HEAD)',
+        $this->getPath(),
+        $base);
+      if ($err) {
+        throw new ArcanistUsageException(
+          "Unable to parse git commit name '{$base}'.");
+      }
+    }
+    $this->setRelativeCommit(trim($merge_base));
+  }
+
+  public function getAllLocalChanges() {
+    $diff = $this->getFullGitDiff();
+    $parser = new ArcanistDiffParser();
+    return $parser->parseDiff($diff);
+  }
+
+  public function supportsLocalBranchMerge() {
+    return true;
+  }
+
+  public function performLocalBranchMerge($branch, $message) {
+    if (!$branch) {
+      throw new ArcanistUsageException(
+        "Under git, you must specify the branch you want to merge.");
+    }
+    $err = phutil_passthru(
+      '(cd %s && git merge --no-ff -m %s %s)',
+      $this->getPath(),
+      $message,
+      $branch);
+
+    if ($err) {
+      throw new ArcanistUsageException("Merge failed!");
+    }
+  }
+
+  public function getFinalizedRevisionMessage() {
+    return "You may now push this commit upstream, as appropriate (e.g. with ".
+           "'git push', or 'git svn dcommit', or by printing and faxing it).";
+  }
+
 }

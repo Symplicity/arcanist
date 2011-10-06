@@ -65,6 +65,14 @@ EOTEXT
   }
 
   public function run() {
+    if ($this->isHistoryImmutable()) {
+      throw new ArcanistUsageException(
+        "This project is marked as adhering to a conservative history ".
+        "mutability doctrine (having an immutable local history), which ".
+        "precludes amending commit messages. You can use 'arc merge' to ".
+        "merge feature branches instead.");
+    }
+
     $repository_api = $this->getRepositoryAPI();
     if (!($repository_api instanceof ArcanistGitAPI)) {
       throw new ArcanistUsageException(
@@ -118,28 +126,13 @@ EOTEXT
       $repository_api->amendGitHeadCommit($message);
       echo "Amended commit message.\n";
 
-      $working_copy = $this->getWorkingCopy();
-      $remote_hooks = $working_copy->getConfig('remote_hooks_installed', false);
-      if (!$remote_hooks) {
-        echo "According to .arcconfig, remote commit hooks are not installed ".
-             "for this project, so the revision will be marked committed now. ".
-             "Consult the documentation for instructions on installing hooks.".
-             "\n\n";
-        $mark_workflow = $this->buildChildWorkflow(
-          'mark-committed',
-          array($revision_id));
-        $mark_workflow->run();
-      }
-
-      $remote_message = ArcanistDifferentialCommitMessage::newFromRawCorpus(
-        $message);
-      $remote_message->pullDataFromConduit($conduit);
-      if ($remote_message->getFieldValue('reviewedByGUIDs') ||
-          $remote_message->getFieldValue('reviewedByPHIDs')) {
-        echo phutil_console_wrap(
-          "You may now push this commit upstream, as appropriate (e.g. with ".
-          "'git push', or 'git svn dcommit', or by printing and faxing it).\n");
-      }
+      $mark_workflow = $this->buildChildWorkflow(
+        'mark-committed',
+        array(
+          '--finalize',
+          $revision_id,
+        ));
+      $mark_workflow->run();
     }
 
     return 0;

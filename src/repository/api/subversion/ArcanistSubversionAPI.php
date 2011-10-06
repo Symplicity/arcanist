@@ -482,4 +482,18 @@ EODIFF;
     return null;
   }
 
+  public function supportsRelativeLocalCommits() {
+    return false;
+  }
+
+  public function supportsLocalBranchMerge() {
+    return false;
+  }
+
+  public function getFinalizedRevisionMessage() {
+    // In other VCSes we give push instructions here, but it never makes sense
+    // in SVN.
+    return "Done.";
+  }
+
 }
