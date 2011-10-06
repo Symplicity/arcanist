@@ -8,6 +8,7 @@
 
 phutil_require_module('arcanist', 'exception/usage/noeffect');
 phutil_require_module('arcanist', 'unit/engine/base');
+phutil_require_module('arcanist', 'unit/result');
 
 
-phutil_require_source('PhutilUnitTestEngine.php');
+phutil_require_source('PHPUnitTestEngine.php');
