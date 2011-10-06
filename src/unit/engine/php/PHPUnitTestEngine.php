@@ -40,7 +40,7 @@ class PHPUnitTestEngine extends ArcanistBaseUnitTestEngine {
     $this->results = array();
     foreach ($tests as $test) {
       $this->testStartTime = microtime(true);
-      exec('/Users/svemir/www/backup/PHPUnit/phpunit.php ' . $test, $output, $return);
+      exec('phpunit ' . $test, $output, $return);
       $this->recordResult($return === 0, $output);
     }
 
@@ -61,7 +61,7 @@ class PHPUnitTestEngine extends ArcanistBaseUnitTestEngine {
     $result->setDuration(microtime(true) - $this->testStartTime);
     $reason = '';
     foreach ($output as $line) {
-      if (trim($line) && !preg_match('#^(PHPUnit|Time|There was|FAILURES|Tests:)#', $line)) {
+      if (trim($line) && !preg_match('#^(PHPUnit|Time|There was|FAILURES|Tests:|[F\.]+$)#', $line)) {
         $reason .= $line . "\n";
       }
     }
