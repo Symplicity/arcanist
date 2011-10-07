@@ -25,21 +25,32 @@ class PHPUnitTestEngine extends ArcanistBaseUnitTestEngine {
 
   public function run() {
 
+    $this->results = array();
     $tests = array();
     foreach ($this->getPaths() as $path) {
-      $test = "./tests/" . str_replace(array('.class', '.inc'), 'Test.php', $path);
-      if (file_exists($test)) {
-        $tests[$path] = $test;
+      $extension = substr($path, strrpos($path, '.'));
+      if (in_array($extension, array('.inc', '.class'))) {
+        $test = "./tests/" . str_replace(array('.class', '.inc'), 'Test.php', $path);
+        if (file_exists($test)) {
+          $tests[$path] = $test;
+        } else {
+          if (file_exists($test = dirname($test))) {
+            $tests[$path] = $test;
+          } else {
+            $result = new ArcanistUnitTestResult();
+            $result->setName($path);
+            $result->setResult(ArcanistUnitTestResult::RESULT_FAIL);
+            $result->setUserData("         No tests found for $test.");
+            $this->results[] = $result;
+          }
+        }
       }
     }
 
-    if (!$tests) {
-      throw new ArcanistNoEffectException("No tests to run.");
-    }
-
-    $this->results = array();
     foreach ($tests as $test) {
+      $this->runningTest = basename($test);
       $this->testStartTime = microtime(true);
+      $output = null;
       exec('phpunit ' . $test, $output, $return);
       $this->recordResult($return === 0, $output);
     }
@@ -54,18 +65,29 @@ class PHPUnitTestEngine extends ArcanistBaseUnitTestEngine {
    * @param array  PHPUnit output.
    * @return void
    */
-  final private function recordResult($passed, $output) {
+  private function recordResult($passed, $output) {
     $result = new ArcanistUnitTestResult();
-    $result->setName($this->runningTest);
-    $result->setResult($passed ? ArcanistUnitTestResult::RESULT_PASS : ArcanistUnitTestResult::RESULT_FAIL);
-    $result->setDuration(microtime(true) - $this->testStartTime);
-    $reason = '';
-    foreach ($output as $line) {
-      if (trim($line) && !preg_match('#^(PHPUnit|Time|There was|FAILURES|Tests:|[F\.]+$)#', $line)) {
-        $reason .= $line . "\n";
+    if ($passed) {
+      $result->setResult(ArcanistUnitTestResult::RESULT_PASS);
+      $result->setDuration(microtime(true) - $this->testStartTime);
+      $result->setName($this->runningTest);
+    } else {
+      $result->setResult(ArcanistUnitTestResult::RESULT_FAIL);
+      $reason = "         ";
+      foreach ($output as $line) {
+        if (trim($line) && !preg_match('#^(PHPUnit|Time|There was|FAILURES|Tests:|[F\.]+$)#', $line)) {
+          $matches = array();
+          if (preg_match('/\d+\) (.+::.+)/', $line, $matches)) {
+            $result->setName($matches[1]);
+          } elseif (preg_match('#/.+.php:(\d+)#', $line, $matches)) {
+            $reason .= " (line {$matches[1]})";
+          } else {
+            $reason .= $line;
+          }
+        }
       }
+      $result->setUserData($reason);
     }
-    $result->setUserData($reason);
     $this->results[] = $result;
   }
 
