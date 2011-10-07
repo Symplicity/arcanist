@@ -73,7 +73,7 @@ class PHPUnitTestEngine extends ArcanistBaseUnitTestEngine {
       $result->setName($this->runningTest);
     } else {
       $result->setResult(ArcanistUnitTestResult::RESULT_FAIL);
-      $reason = "         ";
+      $reason = '';
       foreach ($output as $line) {
         if (trim($line) && !preg_match('#^(PHPUnit|Time|There was|FAILURES|Tests:|[F\.]+$)#', $line)) {
           $matches = array();
@@ -81,12 +81,12 @@ class PHPUnitTestEngine extends ArcanistBaseUnitTestEngine {
             $result->setName($matches[1]);
           } elseif (preg_match('#/.+.php:(\d+)#', $line, $matches)) {
             $reason .= " (line {$matches[1]})";
-          } else {
+          } elseif (!$reason) {
             $reason .= $line;
           }
         }
       }
-      $result->setUserData($reason);
+      $result->setUserData("         $reason");
     }
     $this->results[] = $result;
   }
