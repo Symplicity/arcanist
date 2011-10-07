@@ -23,6 +23,8 @@
  */
 class PHPUnitTestEngine extends ArcanistBaseUnitTestEngine {
 
+  private $testDuration;
+
   public function run() {
 
     $this->results = array();
@@ -34,24 +36,21 @@ class PHPUnitTestEngine extends ArcanistBaseUnitTestEngine {
         if (file_exists($test)) {
           $tests[$path] = $test;
         } else {
-          if (file_exists($test = dirname($test))) {
-            $tests[$path] = $test;
-          } else {
-            $result = new ArcanistUnitTestResult();
-            $result->setName($path);
-            $result->setResult(ArcanistUnitTestResult::RESULT_FAIL);
-            $result->setUserData("         No tests found for $test.");
-            $this->results[] = $result;
-          }
+          $result = new ArcanistUnitTestResult();
+          $result->setName("Missing $test");
+          $result->setResult(ArcanistUnitTestResult::RESULT_FAIL);
+          $result->setUserData("         No tests found for $path");
+          $this->results[] = $result;
         }
       }
     }
 
     foreach ($tests as $test) {
       $this->runningTest = basename($test);
-      $this->testStartTime = microtime(true);
       $output = null;
+      $start = microtime(true);
       exec('phpunit ' . $test, $output, $return);
+      $this->testDuration = microtime(true) - $start;
       $this->recordResult($return === 0, $output);
     }
 
@@ -69,7 +68,7 @@ class PHPUnitTestEngine extends ArcanistBaseUnitTestEngine {
     $result = new ArcanistUnitTestResult();
     if ($passed) {
       $result->setResult(ArcanistUnitTestResult::RESULT_PASS);
-      $result->setDuration(microtime(true) - $this->testStartTime);
+      $result->setDuration($this->testDuration);
       $result->setName($this->runningTest);
     } else {
       $result->setResult(ArcanistUnitTestResult::RESULT_FAIL);
