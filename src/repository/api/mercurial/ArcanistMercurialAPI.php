@@ -205,6 +205,10 @@ class ArcanistMercurialAPI extends ArcanistRepositoryAPI {
 
       $working_status = ArcanistMercurialParser::parseMercurialStatus($stdout);
       foreach ($working_status as $path => $status) {
+        if ($status & ArcanistRepositoryAPI::FLAG_UNTRACKED) {
+          // If the file is untracked, don't mark it uncommitted.
+          continue;
+        }
         $status |= self::FLAG_UNCOMMITTED;
         if (!empty($status_map[$path])) {
           $status_map[$path] |= $status;
@@ -265,11 +269,17 @@ class ArcanistMercurialAPI extends ArcanistRepositoryAPI {
   }
 
   private function getFileDataAtRevision($path, $revision) {
-    list($stdout) = execx(
+    list($err, $stdout) = exec_manual(
       '(cd %s && hg cat --rev %s -- %s)',
       $this->getPath(),
+      $revision,
       $path);
-    return $stdout;
+    if ($err) {
+      // Assume this is "no file at revision", i.e. a deleted or added file.
+      return null;
+    } else {
+      return $stdout;
+    }
   }
 
   private function getWorkingCopyRevision() {
@@ -283,7 +293,12 @@ class ArcanistMercurialAPI extends ArcanistRepositoryAPI {
     list($stdout) = execx(
       '(cd %s && hg --debug id --id)',
       $this->getPath());
-    return trim($stdout);
+
+    // Even with "--id", "hg id" will print a trailing "+" after the hash
+    // if the working copy is dirty (has uncommitted changes). We'll explicitly
+    // detect this later by calling getWorkingCopyStatus(); ignore it for now.
+    $stdout = trim($stdout);
+    return rtrim($stdout, '+');
   }
 
   public function supportsRelativeLocalCommits() {
