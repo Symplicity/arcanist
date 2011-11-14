@@ -35,7 +35,7 @@ class PHPUnitTestEngine extends ArcanistBaseUnitTestEngine {
         $test = "./tests/" . str_replace(array('.class', '.inc'), 'Test.php', $path);
         if (file_exists($test)) {
           $tests[$path] = $test;
-        } else {
+        } elseif (!preg_match('#include/(setup|config)|formdefs/#', $path)) {
           $result = new ArcanistUnitTestResult();
           $result->setName("Missing $test");
           $result->setResult(ArcanistUnitTestResult::RESULT_FAIL);

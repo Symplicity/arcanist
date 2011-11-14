@@ -123,9 +123,9 @@ class SympXHPASTLinter extends ArcanistLinter {
 
     $this->lintUseOfThisInStaticMethods($root);
     $this->lintDynamicDefines($root);
-    $this->lintSurpriseConstructors($root);
-    $this->lintTODOComments($root);
-    $this->lintExitExpressions($root);
+    //$this->lintSurpriseConstructors($root);
+    //$this->lintTODOComments($root);
+    //$this->lintExitExpressions($root);
     $this->lintSpaceAroundBinaryOperators($root);
     $this->lintSpaceAfterControlStatementKeywords($root);
     $this->lintParenthesesShouldHugExpressions($root);
@@ -133,9 +133,9 @@ class SympXHPASTLinter extends ArcanistLinter {
     $this->lintPregQuote($root);
     $this->lintArrayIndexWhitespace($root);
     $this->lintTautologicalExpressions($root);
-    $this->lintPlusOperatorOnStrings($root);
+    //$this->lintPlusOperatorOnStrings($root);
     $this->lintDuplicateKeysInArray($root);
-    $this->lintReusedIterators($root);
+    //$this->lintReusedIterators($root);
     $this->lintBraceFormatting($root);
     $this->lintSpaceIndent($root);
   }
@@ -330,30 +330,6 @@ class SympXHPASTLinter extends ArcanistLinter {
   }
 
   protected function lintNamingConventions($root) {
-    $classes = $root->selectDescendantsOfType('n_CLASS_DECLARATION');
-    foreach ($classes as $class) {
-      $name_token = $class->getChildByIndex(1);
-      $name_string = $name_token->getConcreteString();
-      $is_xhp = ($name_string[0] == ':');
-      if ($is_xhp) {
-        if (!$this->isLowerCaseWithXHP($name_string)) {
-          $this->raiseLintAtNode(
-            $name_token,
-            self::LINT_NAMING_CONVENTIONS,
-            'Follow naming conventions: xhp elements should be named using '.
-            'lower case.');
-        }
-      } else {
-        if (!$this->isUpperCamelCase($name_string)) {
-          $this->raiseLintAtNode(
-            $name_token,
-            self::LINT_NAMING_CONVENTIONS,
-            'Follow naming conventions: classes should be named using '.
-            'UpperCamelCase.');
-        }
-      }
-    }
-
     $ifaces = $root->selectDescendantsOfType('n_INTERFACE_DECLARATION');
     foreach ($ifaces as $iface) {
       $name_token = $iface->getChildByIndex(1);
