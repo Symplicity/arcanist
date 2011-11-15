@@ -416,12 +416,12 @@ class SympXHPASTLinter extends ArcanistLinter {
         }
         $name_token = $prop->getChildByIndex(0);
         $name_string = $name_token->getConcreteString();
-        if (!$this->isLowerCamelCase($name_string)) {
+        if (!$this->isLowercaseWithUnderscores($name_string)) {
           $this->raiseLintAtNode(
             $name_token,
             self::LINT_NAMING_CONVENTIONS,
             'Follow naming conventions: class properties should be named '.
-            'using lowerCamelCase.');
+            'using lowercase_with_underscores.');
         }
       }
     }
