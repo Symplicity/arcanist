@@ -1,7 +1,7 @@
 <?php
 
 /*
- * Copyright 2011 Facebook, Inc.
+ * Copyright 2012 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -67,12 +67,7 @@ abstract class ArcanistLinter {
 
   protected function getData($path) {
     if (!array_key_exists($path, $this->data)) {
-      $disk_path = $this->getEngine()->getFilePathOnDisk($path);
-      if ($disk_path) {
-        $this->data[$path] = Filesystem::readFile($disk_path);
-      } else {
-        throw new Exception("Data is not provided for path '{$path}'!");
-      }
+      $this->data[$path] = $this->getEngine()->loadData($path);
     }
     return $this->data[$path];
   }
@@ -189,6 +184,10 @@ abstract class ArcanistLinter {
   public function willLintPath($path) {
     $this->stopAllLinters = false;
     $this->activePath = $path;
+  }
+
+  public function canRun() {
+    return true;
   }
 
   abstract public function willLintPaths(array $paths);

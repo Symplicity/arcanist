@@ -1,7 +1,7 @@
 <?php
 
 /*
- * Copyright 2011 Facebook, Inc.
+ * Copyright 2012 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,6 +25,7 @@ class ArcanistGitAPI extends ArcanistRepositoryAPI {
 
   private $status;
   private $relativeCommit = null;
+  private $repositoryHasNoCommits = false;
   const SEARCH_LENGTH_FOR_PARENT_REVISIONS = 16;
 
   /**
@@ -41,17 +42,33 @@ class ArcanistGitAPI extends ArcanistRepositoryAPI {
     return 'git';
   }
 
+  public function getHasCommits() {
+    return !$this->repositoryHasNoCommits;
+  }
+
   public function setRelativeCommit($relative_commit) {
     $this->relativeCommit = $relative_commit;
     return $this;
   }
 
   public function getLocalCommitInformation() {
+    if ($this->repositoryHasNoCommits) {
+      // Zero commits.
+      throw new Exception(
+        "You can't get local commit information for a repository with no ".
+        "commits.");
+    } else if ($this->relativeCommit == self::GIT_MAGIC_ROOT_COMMIT) {
+      // One commit.
+      $against = 'HEAD';
+    } else {
+      // 2..N commits.
+      $against = $this->getRelativeCommit().'..HEAD';
+    }
+
     list($info) = execx(
-      '(cd %s && git log %s..%s --format=%s --)',
+      '(cd %s && git log %s --format=%s --)',
       $this->getPath(),
-      $this->getRelativeCommit(),
-      'HEAD',
+      $against,
       '%H%x00%T%x00%P%x00%at%x00%an%x00%s');
 
     $commits = array();
@@ -81,7 +98,14 @@ class ArcanistGitAPI extends ArcanistRepositoryAPI {
         '(cd %s; git rev-parse --verify HEAD^)',
         $this->getPath());
       if ($err) {
+        list($err) = exec_manual(
+          '(cd %s; git rev-parse --verify HEAD)',
+          $this->getPath());
+        if ($err) {
+          $this->repositoryHasNoCommits = true;
+        }
         $this->relativeCommit = self::GIT_MAGIC_ROOT_COMMIT;
+
       } else {
         $this->relativeCommit = 'HEAD^';
       }
@@ -159,11 +183,16 @@ class ArcanistGitAPI extends ArcanistRepositoryAPI {
 
   public function getGitCommitLog() {
     $relative = $this->getRelativeCommit();
-    if ($relative == self::GIT_MAGIC_ROOT_COMMIT) {
+    if ($this->repositoryHasNoCommits) {
+      // No commits yet.
+      return '';
+    } else if ($relative == self::GIT_MAGIC_ROOT_COMMIT) {
+      // First commit.
       list($stdout) = execx(
         '(cd %s; git log --format=medium HEAD)',
         $this->getPath());
     } else {
+      // 2..N commits.
       list($stdout) = execx(
         '(cd %s; git log --first-parent --format=medium %s..HEAD)',
         $this->getPath(),
@@ -221,8 +250,11 @@ class ArcanistGitAPI extends ArcanistRepositoryAPI {
 
       // Find uncommitted changes.
       $uncommitted_future = new ExecFuture(
-        "(cd %s; git diff {$options} --raw HEAD --)",
-        $this->getPath());
+        "(cd %s; git diff {$options} --raw %s --)",
+        $this->getPath(),
+        $this->repositoryHasNoCommits
+          ? self::GIT_MAGIC_ROOT_COMMIT
+          : 'HEAD');
 
       // Untracked files
       $untracked_future = new ExecFuture(
@@ -289,7 +321,7 @@ class ArcanistGitAPI extends ArcanistRepositoryAPI {
 
   public function amendGitHeadCommit($message) {
     execx(
-      '(cd %s; git commit --amend --message %s)',
+      '(cd %s; git commit --amend --allow-empty --message %s)',
       $this->getPath(),
       $message);
   }
@@ -345,7 +377,7 @@ class ArcanistGitAPI extends ArcanistRepositoryAPI {
   public function getBlame($path) {
     // TODO: 'git blame' supports --porcelain and we should probably use it.
     list($stdout) = execx(
-      '(cd %s; git blame --date=iso -w -C %s -- %s)',
+      '(cd %s; git blame --date=iso -w -M %s -- %s)',
       $this->getPath(),
       $this->getRelativeCommit(),
       $path);
@@ -512,6 +544,14 @@ class ArcanistGitAPI extends ArcanistRepositoryAPI {
     return trim($owner);
   }
 
+  public function getWorkingCopyRevision() {
+    list($stdout) = execx(
+      '(cd %s; git rev-parse %s)',
+      $this->getPath(),
+      'HEAD');
+    return rtrim($stdout, "\n");
+  }
+
   public function supportsRelativeLocalCommits() {
     return true;
   }
@@ -533,7 +573,7 @@ class ArcanistGitAPI extends ArcanistRepositoryAPI {
         $base);
       if ($err) {
         throw new ArcanistUsageException(
-          "Unable to parse git commit name '{$base}'.");
+          "Unable to find any git commit named '{$base}' in this repository.");
       }
     }
     $this->setRelativeCommit(trim($merge_base));
@@ -568,6 +608,15 @@ class ArcanistGitAPI extends ArcanistRepositoryAPI {
   public function getFinalizedRevisionMessage() {
     return "You may now push this commit upstream, as appropriate (e.g. with ".
            "'git push', or 'git svn dcommit', or by printing and faxing it).";
+  }
+
+  public function getCommitMessageForRevision($rev) {
+    list($message) = execx(
+      '(cd %s && git log -n1 %s)',
+      $this->getPath(),
+      $rev);
+    $parser = new ArcanistDiffParser();
+    return head($parser->parseDiff($message));
   }
 
 }

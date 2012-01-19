@@ -1,7 +1,7 @@
 <?php
 
 /*
- * Copyright 2011 Facebook, Inc.
+ * Copyright 2012 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -131,7 +131,6 @@ EOTEXT
       }
     }
 
-
     if ($failed && $resolved) {
       $failed_paths = '        '.implode("\n        ", $failed);
       $resolved_paths = '        '.implode("\n        ", array_keys($resolved));
@@ -178,21 +177,15 @@ EOTEXT
       $repository,
       $config_file);
 
-    $data = array();
-    foreach ($paths as $path) {
-      // TODO: This should be done in parallel.
-      list($err, $filedata) = exec_manual(
-        'svnlook cat --transaction %s %s %s',
-        $transaction,
-        $repository,
-        $path);
-      $data[$path] = $err ? null : $filedata;
-    }
-
     $working_copy = ArcanistWorkingCopyIdentity::newFromRootAndConfigFile(
       $project_root,
       $config,
       $config_file." (svnlook: {$transaction} {$repository})");
+
+    $repository_api = new ArcanistSubversionHookAPI(
+      $project_root,
+      $transaction,
+      $repository);
 
     $lint_engine = $working_copy->getConfig('lint_engine');
     if (!$lint_engine) {
@@ -204,9 +197,9 @@ EOTEXT
     $engine = newv($lint_engine, array());
     $engine->setWorkingCopy($working_copy);
     $engine->setMinimumSeverity(ArcanistLintSeverity::SEVERITY_ERROR);
-    $engine->setPaths(array_keys($data));
-    $engine->setFileData($data);
+    $engine->setPaths($paths);
     $engine->setCommitHookMode(true);
+    $engine->setHookAPI($repository_api);
 
     try {
       $results = $engine->run();

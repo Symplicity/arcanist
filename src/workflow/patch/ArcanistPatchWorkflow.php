@@ -1,7 +1,7 @@
 <?php
 
 /*
- * Copyright 2011 Facebook, Inc.
+ * Copyright 2012 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -38,7 +38,7 @@ final class ArcanistPatchWorkflow extends ArcanistBaseWorkflow {
       **patch** __--diff__ __diff_id__
       **patch** __--patch__ __file__
       **patch** __--arcbundle__ __bundlefile__
-          Supports: git, svn
+          Supports: git, svn, hg
           Apply the changes in a Differential revision, patchfile, or arc
           bundle to the working copy.
 EOTEXT
@@ -74,6 +74,18 @@ EOTEXT
         'paramtype' => 'file',
         'help' =>
           "Apply changes from a git patchfile or unified patchfile.",
+      ),
+      'nocommit' => array(
+        'supports' => array(
+          'git'
+        ),
+        'help' =>
+          "Normally under git if the patch is successful the changes are ".
+          "committed to the working copy. This flag prevents the commit.",
+      ),
+      'force' => array(
+        'help' =>
+          "Do not run any sanity checks.",
       ),
       '*' => 'name',
     );
@@ -131,8 +143,7 @@ EOTEXT
   }
 
   public function requiresConduit() {
-    return ($this->getSource() == self::SOURCE_REVISION) ||
-           ($this->getSource() == self::SOURCE_DIFF);
+    return ($this->getSource() != self::SOURCE_PATCH);
   }
 
   public function requiresRepositoryAPI() {
@@ -149,6 +160,15 @@ EOTEXT
 
   private function getSourceParam() {
     return $this->sourceParam;
+  }
+
+  private function shouldCommit() {
+    $no_commit = $this->getArgument('nocommit', false);
+    if ($no_commit) {
+      return false;
+    }
+
+    return true;
   }
 
   public function run() {
@@ -186,13 +206,20 @@ EOTEXT
       }
     } catch (Exception $ex) {
       if ($ex->getErrorCode() == 'ERR-INVALID-SESSION') {
-        // Phabricator is not configured to allow anonymos access to
+        // Phabricator is not configured to allow anonymous access to
         // Differential.
         $this->authenticateConduit();
         return $this->run();
       } else {
         throw $ex;
       }
+    }
+
+    $force = $this->getArgument('force', false);
+    if ($force) {
+      // force means don't do any sanity checks about the patch
+    } else {
+      $this->sanityCheckPatch($bundle);
     }
 
     $repository_api = $this->getRepositoryAPI();
@@ -393,23 +420,185 @@ EOTEXT
       }
 
       return $patch_err;
-    } else {
+    } else if ($repository_api instanceof ArcanistGitAPI) {
+      // if we're going to commit, we should make sure the working copy
+      // is clean
+      if ($this->shouldCommit()) {
+        $this->requireCleanWorkingCopy();
+      }
+
       $future = new ExecFuture(
         '(cd %s; git apply --index --reject)',
         $repository_api->getPath());
       $future->write($bundle->toGitPatch());
       $future->resolvex();
 
+      if ($this->shouldCommit()) {
+        $commit_message = $this->getCommitMessage($bundle);
+        $future = new ExecFuture(
+          '(cd %s; git commit -a -F -)',
+          $repository_api->getPath());
+        $future->write($commit_message);
+        $future->resolvex();
+        $verb = 'committed';
+      } else {
+        $verb = 'applied';
+      }
+      echo phutil_console_format(
+        "<bg:green>** OKAY **</bg> Successfully {$verb} patch.\n");
+    } else if ($repository_api instanceof ArcanistMercurialAPI) {
+      $future = new ExecFuture(
+        '(cd %s; hg import --no-commit -)',
+        $repository_api->getPath());
+      $future->write($bundle->toGitPatch());
+      $future->resolvex();
+
       echo phutil_console_format(
         "<bg:green>** OKAY **</bg> Successfully applied patch.\n");
+    } else {
+      throw new Exception('Unknown version control system.');
     }
 
     return 0;
   }
 
+  private function getCommitMessage(ArcanistBundle $bundle) {
+    $revision_id    = $bundle->getRevisionID();
+    $commit_message = null;
+    $prompt_message = null;
+
+    // if we have a revision id the commit message is in differential
+    if ($revision_id) {
+      $conduit        = $this->getConduit();
+      $commit_message = $conduit->callMethodSynchronous(
+        'differential.getcommitmessage',
+        array(
+          'revision_id' => $revision_id,
+        ));
+      $prompt_message = "  Note arcanist failed to load the commit message ".
+                        "from differential for revision D{$revision_id}.";
+    }
+
+    // no revision id or failed to fetch commit message so get it from the
+    // user on the command line
+    if (!$commit_message) {
+      $template =
+        "\n\n".
+        "# Enter a commit message for this patch.  If you just want to apply ".
+        "the patch to the working copy without committing, re-run arc patch ".
+        "with the --nocommit flag.".
+        $prompt_message.
+        "\n";
+
+      $commit_message = id(new PhutilInteractiveEditor($template))
+        ->setName('arcanist-patch-commit-message')
+        ->editInteractively();
+
+      $commit_message = preg_replace('/^\s*#.*$/m',
+                                     '',
+                                     $commit_message);
+      $commit_message = rtrim($commit_message);
+      if (!strlen($commit_message)) {
+        throw new ArcanistUserAbortException();
+      }
+    }
+
+    return $commit_message;
+  }
+
   public function getShellCompletions(array $argv) {
     // TODO: Pull open diffs from 'arc list'?
     return array('ARGUMENT');
+  }
+
+  /**
+   * Do the best we can to prevent PEBKAC and id10t issues.
+   */
+  private function sanityCheckPatch(ArcanistBundle $bundle) {
+
+    // Check to see if the bundle's project id matches the working copy
+    // project id
+    $bundle_project_id = $bundle->getProjectID();
+    $working_copy_project_id = $this->getWorkingCopy()->getProjectID();
+    if (empty($bundle_project_id)) {
+      // this means $source is SOURCE_PATCH || SOURCE_BUNDLE w/ $version = 0
+      // they don't come with a project id so just do nothing
+    } else if ($bundle_project_id != $working_copy_project_id) {
+      $ok = phutil_console_confirm(
+        "This diff is for the '{$bundle_project_id}' project but the working ".
+        "copy belongs to the '{$working_copy_project_id}' project. ".
+        "Still try to apply it?",
+        $default_no = false
+      );
+      if (!$ok) {
+        throw new ArcanistUserAbortException();
+      }
+    }
+
+    // Check to see if the bundle's base revision matches the working copy
+    // base revision
+    $bundle_base_rev = $bundle->getBaseRevision();
+    if (empty($bundle_base_rev)) {
+      // this means $source is SOURCE_PATCH || SOURCE_BUNDLE w/ $version < 2
+      // they don't have a base rev so just do nothing
+    } else {
+      $repository_api = $this->getRepositoryAPI();
+      $source_base_rev = $repository_api->getWorkingCopyRevision();
+
+      if ($source_base_rev != $bundle_base_rev) {
+        // we have a problem...! lots of work because we need to ask
+        // differential for revision information for these base revisions
+        // to improve our error message.
+        $bundle_base_rev_str = null;
+        $source_base_rev_str = null;
+
+        // SVN doesn't store these hashes, so we're basically done already
+        // and will have a relatively "lame" error message
+        if ($repository_api instanceof ArcanistSubversionAPI) {
+          $hash_type = null;
+        } else if ($repository_api instanceof ArcanistGitAPI) {
+          $hash_type = ArcanistDifferentialRevisionHash::HASH_GIT_COMMIT;
+        } else if ($repository_api instanceof ArcanistMercurialAPI) {
+          $hash_type = ArcanistDifferentialRevisionHash::HASH_MERCURIAL_COMMIT;
+        } else {
+          $hash_type = null;
+        }
+
+        if ($hash_type) {
+          // 2 round trips because even though we could send off one query
+          // we wouldn't be able to tell which revisions were for which hash
+          $hash = array($hash_type, $bundle_base_rev);
+          $bundle_revision = $this->loadRevisionFromHash($hash);
+          $hash = array($hash_type, $source_base_rev);
+          $source_revision = $this->loadRevisionFromHash($hash);
+
+          if ($bundle_revision) {
+            $bundle_base_rev_str = $bundle_base_rev .
+                                   ' \ D' . $bundle_revision['id'];
+          }
+          if ($source_revision) {
+            $source_base_rev_str = $source_base_rev .
+                                   ' \ D' . $source_revision['id'];
+          }
+        }
+        $bundle_base_rev_str = nonempty($bundle_base_rev_str,
+                                        $bundle_base_rev);
+        $source_base_rev_str = nonempty($source_base_rev_str,
+                                        $source_base_rev);
+
+        $ok = phutil_console_confirm(
+          "This diff is against commit {$bundle_base_rev_str}, but the ".
+          "working copy is at {$source_base_rev_str}.  ".
+          "Still try to apply it?",
+          $default_no = false
+        );
+        if (!$ok) {
+          throw new ArcanistUserAbortException();
+        }
+      }
+    }
+
+    // TODO -- more sanity checks here
   }
 
   /**
@@ -434,5 +623,28 @@ EOTEXT
           $repository_api->getPath(),
           $dir));
     }
+  }
+
+  private function loadRevisionFromHash($hash) {
+    $conduit = $this->getConduit();
+
+    $revisions = $conduit->callMethodSynchronous(
+      'differential.query',
+      array(
+        'commitHashes' => array($hash),
+      )
+    );
+
+
+    // grab the latest committed revision only
+    $found_revision = null;
+    $revisions = isort($revisions, 'dateModified');
+    foreach ($revisions as $revision) {
+      if ($revision['status'] ==
+          ArcanistDifferentialRevisionStatus::COMMITTED) {
+        $found_revision = $revision;
+      }
+    }
+    return $found_revision;
   }
 }
