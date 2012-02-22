@@ -8,6 +8,7 @@
 phutil_register_library_map(array(
   'class' =>
   array(
+    'ArcanistAliasWorkflow' => 'workflow/alias',
     'ArcanistAmendWorkflow' => 'workflow/amend',
     'ArcanistApacheLicenseLinter' => 'lint/linter/apachelicense',
     'ArcanistApacheLicenseLinterTestCase' => 'lint/linter/apachelicense/__tests__',
@@ -21,6 +22,7 @@ phutil_register_library_map(array(
     'ArcanistChooseInvalidRevisionException' => 'exception',
     'ArcanistChooseNoRevisionsException' => 'exception',
     'ArcanistCommitWorkflow' => 'workflow/commit',
+    'ArcanistConduitLinter' => 'lint/linter/conduit',
     'ArcanistConfiguration' => 'configuration',
     'ArcanistCoverWorkflow' => 'workflow/cover',
     'ArcanistDiffChange' => 'parser/diff/change',
@@ -47,6 +49,7 @@ phutil_register_library_map(array(
     'ArcanistHookAPI' => 'repository/hookapi/base',
     'ArcanistInstallCertificateWorkflow' => 'workflow/install-certificate',
     'ArcanistJSHintLinter' => 'lint/linter/jshint',
+    'ArcanistLandWorkflow' => 'workflow/land',
     'ArcanistLiberateLintEngine' => 'lint/engine/liberate',
     'ArcanistLiberateWorkflow' => 'workflow/liberate',
     'ArcanistLicenseLinter' => 'lint/linter/license',
@@ -94,8 +97,10 @@ phutil_register_library_map(array(
     'ArcanistUploadWorkflow' => 'workflow/upload',
     'ArcanistUsageException' => 'exception/usage',
     'ArcanistUserAbortException' => 'exception/usage/userabort',
+    'ArcanistWhichWorkflow' => 'workflow/which',
     'ArcanistWorkingCopyIdentity' => 'workingcopyidentity',
     'ArcanistXHPASTLintNamingHook' => 'lint/linter/xhpast/naminghook',
+    'ArcanistXHPASTLintNamingHookTestCase' => 'lint/linter/xhpast/naminghook/__tests__',
     'ArcanistXHPASTLinter' => 'lint/linter/xhpast',
     'ArcanistXHPASTLinterTestCase' => 'lint/linter/xhpast/__tests__',
     'BranchInfo' => 'branch',
@@ -115,6 +120,7 @@ phutil_register_library_map(array(
   ),
   'requires_class' =>
   array(
+    'ArcanistAliasWorkflow' => 'ArcanistBaseWorkflow',
     'ArcanistAmendWorkflow' => 'ArcanistBaseWorkflow',
     'ArcanistApacheLicenseLinter' => 'ArcanistLicenseLinter',
     'ArcanistApacheLicenseLinterTestCase' => 'ArcanistLinterTestCase',
@@ -122,6 +128,7 @@ phutil_register_library_map(array(
     'ArcanistBundleTestCase' => 'ArcanistPhutilTestCase',
     'ArcanistCallConduitWorkflow' => 'ArcanistBaseWorkflow',
     'ArcanistCommitWorkflow' => 'ArcanistBaseWorkflow',
+    'ArcanistConduitLinter' => 'ArcanistLinter',
     'ArcanistCoverWorkflow' => 'ArcanistBaseWorkflow',
     'ArcanistDiffParserTestCase' => 'ArcanistPhutilTestCase',
     'ArcanistDiffUtilsTestCase' => 'ArcanistPhutilTestCase',
@@ -136,6 +143,7 @@ phutil_register_library_map(array(
     'ArcanistHelpWorkflow' => 'ArcanistBaseWorkflow',
     'ArcanistInstallCertificateWorkflow' => 'ArcanistBaseWorkflow',
     'ArcanistJSHintLinter' => 'ArcanistLinter',
+    'ArcanistLandWorkflow' => 'ArcanistBaseWorkflow',
     'ArcanistLiberateLintEngine' => 'ArcanistLintEngine',
     'ArcanistLiberateWorkflow' => 'ArcanistBaseWorkflow',
     'ArcanistLicenseLinter' => 'ArcanistLinter',
@@ -167,6 +175,8 @@ phutil_register_library_map(array(
     'ArcanistUnitWorkflow' => 'ArcanistBaseWorkflow',
     'ArcanistUploadWorkflow' => 'ArcanistBaseWorkflow',
     'ArcanistUserAbortException' => 'ArcanistUsageException',
+    'ArcanistWhichWorkflow' => 'ArcanistBaseWorkflow',
+    'ArcanistXHPASTLintNamingHookTestCase' => 'ArcanistPhutilTestCase',
     'ArcanistXHPASTLinter' => 'ArcanistLinter',
     'ArcanistXHPASTLinterTestCase' => 'ArcanistLinterTestCase',
     'ComprehensiveLintEngine' => 'ArcanistLintEngine',

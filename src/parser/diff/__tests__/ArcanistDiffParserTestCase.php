@@ -1,7 +1,7 @@
 <?php
 
 /*
- * Copyright 2011 Facebook, Inc.
+ * Copyright 2012 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@
  *
  * @group testcase
  */
-class ArcanistDiffParserTestCase extends ArcanistPhutilTestCase {
+final class ArcanistDiffParserTestCase extends ArcanistPhutilTestCase {
 
   public function testParser() {
     $root = dirname(__FILE__).'/data/';
@@ -476,6 +476,16 @@ EOTEXT
         $this->assertEqual(
           ArcanistDiffChangeType::FILE_BINARY,
           $change->getFileType());
+        break;
+      case 'git-odd-filename.gitdiff':
+        $this->assertEqual(2, count($changes));
+        $change = reset($changes);
+        $this->assertEqual(
+          'old/'."\342\210\206".'.jpg',
+          $change->getOldPath());
+        $this->assertEqual(
+          'new/'."\342\210\206".'.jpg',
+          $change->getCurrentPath());
         break;
       case 'hg-binary-change.hgdiff':
       case 'hg-solo-binary-change.hgdiff':

@@ -1,7 +1,7 @@
 <?php
 
 /*
- * Copyright 2011 Facebook, Inc.
+ * Copyright 2012 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@
  * Holds information about a single git branch, and provides methods
  * for loading and display.
  */
-class BranchInfo {
+final class BranchInfo {
 
   private $branchName;
   private $currentHead = false;
@@ -151,15 +151,13 @@ class BranchInfo {
    * Generates a colored status name
    */
   public function getFormattedStatus() {
-    return phutil_console_format(
-      '<fg:'.$this->getColorForStatus().'>%s</fg>',
-      $this->status);
+    return self::renderColorizedRevisionStatus($this->status);
   }
 
   /**
    * Assigns a pretty color based on the status
    */
-  private function getColorForStatus() {
+  private static function getColorForStatus($status) {
     static $status_to_color = array(
       'Committed' => 'cyan',
       'Needs Review' => 'magenta',
@@ -168,7 +166,13 @@ class BranchInfo {
       'No Revision' => 'blue',
       'Abandoned' => 'default',
     );
-    return idx($status_to_color, $this->status, 'default');
+    return idx($status_to_color, $status, 'default');
+  }
+
+  public static function renderColorizedRevisionStatus($status) {
+    return phutil_console_format(
+      '<fg:'.self::getColorForStatus($status).'>%s</fg>',
+      $status);
   }
 
 }

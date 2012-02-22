@@ -75,6 +75,16 @@ EOTEXT
         'help' =>
           "Apply changes from a git patchfile or unified patchfile.",
       ),
+      'update' => array(
+        'supports' => array(
+          'git', 'svn', 'hg'
+        ),
+        'help' =>
+          "Update the local working copy before applying the patch.",
+        'conflicts' => array(
+          'nobranch' => true,
+        ),
+      ),
       'nocommit' => array(
         'supports' => array(
           'git'
@@ -82,6 +92,19 @@ EOTEXT
         'help' =>
           "Normally under git if the patch is successful the changes are ".
           "committed to the working copy. This flag prevents the commit.",
+      ),
+      'nobranch' => array(
+        'supports' => array(
+          'git'
+        ),
+        'help' =>
+          "Normally under git a new branch is created and then the patch ".
+          "is applied and committed in the branch.  This flag skips the ".
+          "branch creation step and applies and commits the patch to the ".
+          "current branch.",
+        'conflicts' => array(
+          'update' => true,
+        ),
       ),
       'force' => array(
         'help' =>
@@ -171,6 +194,122 @@ EOTEXT
     return true;
   }
 
+  private function shouldBranch() {
+    // git only for now
+    $repository_api = $this->getRepositoryAPI();
+    if (!($repository_api instanceof ArcanistGitAPI)) {
+      return false;
+    }
+
+    $no_branch = $this->getArgument('nobranch', false);
+    if ($no_branch) {
+      return false;
+    }
+
+    return true;
+  }
+
+  private function getBranchName(ArcanistBundle $bundle) {
+    $branch_name    = null;
+    $repository_api = $this->getRepositoryAPI();
+    $revision_id    = $bundle->getRevisionID();
+    $base_name      = "arcpatch";
+    if ($revision_id) {
+      $base_name .= "-D{$revision_id}";
+    }
+
+    $suffixes = array(null, '-1', '-2', '-3');
+    foreach ($suffixes as $suffix) {
+      $proposed_name = $base_name.$suffix;
+
+      list($err) = exec_manual(
+        '(cd %s; git rev-parse --verify %s)',
+        $repository_api->getPath(),
+        $proposed_name
+      );
+
+      // no error means git rev-parse found a branch
+      if (!$err) {
+        echo phutil_console_format(
+          "Branch name {$proposed_name} already exists; trying a new name.\n"
+        );
+        continue;
+      } else {
+        $branch_name = $proposed_name;
+        break;
+      }
+    }
+
+    if (!$branch_name) {
+      throw new Exception(
+        "Arc was unable to automagically make a name for this patch.  ".
+        "Please clean up your working copy and try again."
+      );
+    }
+
+    return $branch_name;
+  }
+
+  private function createBranch(ArcanistBundle $bundle) {
+    $branch_name    = $this->getBranchName($bundle);
+    $repository_api = $this->getRepositoryAPI();
+    $base_revision  = $bundle->getBaseRevision();
+
+    // verify the base revision is valid
+    // in a working copy that uses the git-svn bridge, the base revision might
+    // be a svn uri instead of a git ref
+    list($err) = exec_manual(
+      '(cd %s; git rev-parse --verify %s)',
+      $repository_api->getPath(),
+      $base_revision
+    );
+
+    if ($base_revision && !$err) {
+      execx(
+        '(cd %s; git checkout -b %s %s)',
+        $repository_api->getPath(),
+        $branch_name,
+        $base_revision);
+    } else {
+      execx(
+        '(cd %s; git checkout -b %s)',
+        $repository_api->getPath(),
+        $branch_name);
+    }
+
+    echo phutil_console_format(
+      "Created and checked out branch {$branch_name}.\n"
+    );
+  }
+
+  private function shouldUpdateWorkingCopy() {
+    return $this->getArgument('update', false);
+  }
+
+  private function updateWorkingCopy() {
+    $repository_api = $this->getRepositoryAPI();
+    if ($repository_api instanceof ArcanistSubversionAPI) {
+      execx(
+        '(cd %s; svn up)',
+        $repository_api->getPath());
+      $message = "Updated to HEAD.  ";
+    } else if ($repository_api instanceof ArcanistGitAPI) {
+      execx(
+        '(cd %s; git pull)',
+        $repository_api->getPath());
+      $message = "Updated to HEAD.  ";
+    } else if ($repository_api instanceof ArcanistMercurialAPI) {
+      execx(
+        '(cd %s; hg up)',
+        $repository_api->getPath());
+      $message = "Updated to tip.  ";
+    } else {
+      throw new Exception('Unknown version control system.');
+    }
+
+    echo phutil_console_format($message."\n");
+  }
+
   public function run() {
 
     $source = $this->getSource();
@@ -214,12 +353,20 @@ EOTEXT
         throw $ex;
       }
     }
-
     $force = $this->getArgument('force', false);
     if ($force) {
       // force means don't do any sanity checks about the patch
     } else {
-      $this->sanityCheckPatch($bundle);
+      $this->sanityCheck($bundle);
+    }
+
+    // we should update the working copy before we do ANYTHING else
+    if ($this->shouldUpdateWorkingCopy()) {
+      $this->updateWorkingCopy();
+    }
+
+    if ($this->shouldBranch()) {
+      $this->createBranch($bundle);
     }
 
     $repository_api = $this->getRepositoryAPI();
@@ -405,8 +552,8 @@ EOTEXT
 
       if ($patch_err == 0) {
         echo phutil_console_format(
-          "<bg:green>** OKAY **</bg> Successfully applied patch to the ".
-          "working copy.\n");
+          "<bg:green>** OKAY **</bg> Successfully applied patch ".
+          "to the working copy.\n");
       } else {
         echo phutil_console_format(
           "\n\n<bg:yellow>** WARNING **</bg> Some hunks could not be applied ".
@@ -421,12 +568,6 @@ EOTEXT
 
       return $patch_err;
     } else if ($repository_api instanceof ArcanistGitAPI) {
-      // if we're going to commit, we should make sure the working copy
-      // is clean
-      if ($this->shouldCommit()) {
-        $this->requireCleanWorkingCopy();
-      }
-
       $future = new ExecFuture(
         '(cd %s; git apply --index --reject)',
         $repository_api->getPath());
@@ -514,7 +655,10 @@ EOTEXT
   /**
    * Do the best we can to prevent PEBKAC and id10t issues.
    */
-  private function sanityCheckPatch(ArcanistBundle $bundle) {
+  private function sanityCheck(ArcanistBundle $bundle) {
+
+    // Require clean working copy
+    $this->requireCleanWorkingCopy();
 
     // Check to see if the bundle's project id matches the working copy
     // project id
@@ -626,6 +770,12 @@ EOTEXT
   }
 
   private function loadRevisionFromHash($hash) {
+    // TODO -- de-hack this as permissions become more clear with things
+    // like T848 (add scope to OAuth)
+    if (!$this->isConduitAuthenticated()) {
+      return null;
+    }
+
     $conduit = $this->getConduit();
 
     $revisions = $conduit->callMethodSynchronous(

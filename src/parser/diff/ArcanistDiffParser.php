@@ -1,7 +1,7 @@
 <?php
 
 /*
- * Copyright 2011 Facebook, Inc.
+ * Copyright 2012 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@
  *
  * @group diff
  */
-class ArcanistDiffParser {
+final class ArcanistDiffParser {
 
   protected $api;
   protected $text;
@@ -209,7 +209,10 @@ class ArcanistDiffParser {
         // This is a git commit message, probably from "git show".
         '(?P<type>commit) (?P<hash>[a-f0-9]+)',
         // This is a git diff, probably from "git show" or "git diff".
-        '(?P<type>diff --git) [abicwo12]/(?P<old>.+) [abicwo12]/(?P<cur>.+)',
+        // Note that the filenames may appear quoted.
+        '(?P<type>diff --git) '.
+          '(?P<old>"?[abicwo12]/.+"?) '.
+          '(?P<cur>"?[abicwo12]/.+"?)',
         // This is a unified diff, probably from "diff -u" or synthetic diffing.
         '(?P<type>---) (?P<old>.+)\s+\d{4}-\d{2}-\d{2}.*',
         '(?P<binary>Binary) files '.
@@ -236,6 +239,19 @@ class ArcanistDiffParser {
           "'Property changes on: /path/to/file.ext' (svn properties), ".
           "'commit 59bcc3ad6775562f845953cf01624225' (git show), ".
           "'diff --git' (git diff), or '--- filename' (unified diff).");
+      }
+
+      if (isset($match['type'])) {
+        if ($match['type'] == 'diff --git') {
+          if (isset($match['old'])) {
+            $match['old'] = $this->unescapeFilename($match['old']);
+            $match['old'] = substr($match['old'], 2);
+          }
+          if (isset($match['cur'])) {
+            $match['cur'] = $this->unescapeFilename($match['cur']);
+            $match['cur'] = substr($match['cur'], 2);
+          }
+        }
       }
 
       $change = $this->buildChange(idx($match, 'cur'));
@@ -519,10 +535,12 @@ class ArcanistDiffParser {
         }
 
         if (!empty($match['old'])) {
+          $match['old'] = $this->unescapeFilename($match['old']);
           $change->setOldPath($match['old']);
         }
 
         if (!empty($match['cur'])) {
+          $match['cur'] = $this->unescapeFilename($match['cur']);
           $change->setCurrentPath($match['cur']);
         }
 
@@ -940,5 +958,16 @@ class ArcanistDiffParser {
 
     $message = "Parse Exception: {$message}\n\n{$context}\n";
     throw new Exception($message);
+  }
+
+  /**
+   * Unescape escaped filenames, e.g. from "git diff".
+   */
+  private function unescapeFilename($name) {
+    if (preg_match('/^".+"$/', $name)) {
+      return stripcslashes(substr($name, 1, -1));
+    } else {
+      return $name;
+    }
   }
 }
