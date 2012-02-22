@@ -23,4 +23,10 @@ class SympArcanistLintEngine extends ArcanistLintEngine {
     return $linters;
   }
 
+  protected function getPassthruArgumentsAsArgv($command) {
+    $argv = parent::getPassthruArgumentsAsArgv($command);
+    $argv += $this->arguments['paths'];
+    return $argv;
+  }
+
 }
