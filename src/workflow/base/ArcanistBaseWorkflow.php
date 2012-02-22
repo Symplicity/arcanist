@@ -917,6 +917,11 @@ abstract class ArcanistBaseWorkflow {
         $argv[] = $value;
       }
     }
+    // quick hack, this should probably be handled in getPassthruArgumentsAsMap
+    $paths = $this->getArgument('paths');
+    if ($paths) {
+      $argv += $paths;
+    }
     return $argv;
   }
 
