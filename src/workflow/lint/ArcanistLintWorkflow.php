@@ -130,7 +130,7 @@ EOTEXT
       // NOTE: When the user specifies paths, we imply --lintall and show all
       // warnings for the paths in question. This is easier to deal with for
       // us and less confusing for users.
-      $should_lint_all = true;
+      //$should_lint_all = true;
     }
 
     $paths = $this->selectPathsForWorkflow($paths, $rev);
