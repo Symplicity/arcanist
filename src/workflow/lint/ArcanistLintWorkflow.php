@@ -36,10 +36,16 @@ class ArcanistLintWorkflow extends ArcanistBaseWorkflow {
     return $this;
   }
 
-  public function getCommandHelp() {
+  public function getCommandSynopses() {
     return phutil_console_format(<<<EOTEXT
       **lint** [__options__] [__paths__]
       **lint** [__options__] --rev [__rev__]
+EOTEXT
+      );
+  }
+
+  public function getCommandHelp() {
+    return phutil_console_format(<<<EOTEXT
           Supports: git, svn, hg
           Run static analysis on changes to check for mistakes. If no files
           are specified, lint will be run on all files which have been modified.
@@ -68,7 +74,8 @@ EOTEXT
         'param' => 'format',
         'help' =>
           "With 'summary', show lint warnings in a more compact format. ".
-          "With 'json', show lint warnings in machine-readable JSON format."
+          "With 'json', show lint warnings in machine-readable JSON format. ".
+          "With 'compiler', show lint warnings in suitable for your editor."
       ),
       'advice' => array(
         'help' =>
@@ -189,6 +196,11 @@ EOTEXT
         break;
       case 'summary':
         $renderer = new ArcanistLintSummaryRenderer();
+        break;
+      case 'compiler':
+        $renderer = new ArcanistLintLikeCompilerRenderer();
+        $prompt_patches = false;
+        $apply_patches = $this->getArgument('apply-patches');
         break;
       default:
         $renderer = new ArcanistLintRenderer();

@@ -34,20 +34,20 @@ phutil_require_module('arcanist', 'repository/api/base');
 
 ini_set('memory_limit', -1);
 
-$config_trace_mode = false;
+$original_argv = $argv;
+$args = new PhutilArgumentParser($argv);
+$args->parseStandardArguments();
+
+$argv = $args->getUnconsumedArgumentVector();
+$config_trace_mode = $args->getArg('trace');
+
 $force_conduit = null;
-$args = array_slice($argv, 1);
+$args = $argv;
 $load = array();
 $matches = null;
 foreach ($args as $key => $arg) {
   if ($arg == '--') {
     break;
-  } else if ($arg == '--trace') {
-    unset($args[$key]);
-    $config_trace_mode = true;
-  } else if ($arg == '--no-ansi') {
-    unset($args[$key]);
-    PhutilConsoleFormatter::disableANSI(true);
   } else if (preg_match('/^--load-phutil-library=(.*)$/', $arg, $matches)) {
     unset($args[$key]);
     $load[] = $matches[1];
@@ -57,19 +57,10 @@ foreach ($args as $key => $arg) {
   }
 }
 
-// The POSIX extension is not available by default in some PHP installs.
-if (function_exists('posix_isatty') && !posix_isatty(STDOUT)) {
-  PhutilConsoleFormatter::disableANSI(true);
-}
-
 $args = array_values($args);
 $working_directory = getcwd();
 
 try {
-
-  if ($config_trace_mode) {
-    PhutilServiceProfiler::installEchoListener();
-  }
 
   if (!$args) {
     throw new ArcanistUsageException("No command provided. Try 'arc help'.");
@@ -252,7 +243,7 @@ try {
   $user_name = idx($host_config, 'user');
   $certificate = idx($host_config, 'cert');
 
-  $description = implode(' ', $argv);
+  $description = implode(' ', $original_argv);
   $credentials = array(
     'user'        => $user_name,
     'certificate' => $certificate,
@@ -331,15 +322,23 @@ function sanity_check_environment() {
       "'{$min_version}'.");
   }
 
-  $need_functions = array(
-    'json_decode' => '--without-json',
-  );
+  // NOTE: We don't have phutil_is_windows() yet here.
+
+  if (DIRECTORY_SEPARATOR != '/') {
+    $need_functions = array(
+      'curl_init'     => array('builtin-dll', 'php_curl.dll'),
+    );
+  } else {
+    $need_functions = array(
+      'json_decode'   => array('flag',        '--without-json'),
+    );
+  }
 
   $problems = array();
 
   $config = null;
   $show_config = false;
-  foreach ($need_functions as $fname => $flag) {
+  foreach ($need_functions as $fname => $resolution) {
     if (function_exists($fname)) {
       continue;
     }
@@ -355,15 +354,29 @@ function sanity_check_environment() {
       }
     }
 
-    if (strpos($config, $flag) !== false) {
+    $generic = true;
+    list($what, $which) = $resolution;
+
+    if ($what == 'flag' && strpos($config, $which) !== false) {
       $show_config = true;
+      $generic = false;
       $problems[] =
-        "This build of PHP was compiled with the configure flag '{$flag}', ".
+        "This build of PHP was compiled with the configure flag '{$which}', ".
         "which means it does not have the function '{$fname}()'. This ".
         "function is required for arc to run. Rebuild PHP without this flag. ".
         "You may also be able to build or install the relevant extension ".
         "separately.";
-    } else {
+    }
+
+    if ($what == 'builtin-dll') {
+      $generic = false;
+      $problems[] =
+        "Your install of PHP does not have the '{$which}' extension enabled. ".
+        "Edit your php.ini file and uncomment the line which reads ".
+        "'extension={$which}'.";
+    }
+
+    if ($generic) {
       $problems[] =
         "This build of PHP is missing the required function '{$fname}()'. ".
         "Rebuild PHP or install the extension which provides '{$fname}()'.";

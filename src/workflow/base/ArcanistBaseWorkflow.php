@@ -64,6 +64,8 @@ abstract class ArcanistBaseWorkflow {
   private $arguments;
   private $command;
 
+  private $repositoryEncoding;
+
   private $arcanistConfiguration;
   private $parentWorkflow;
   private $workingDirectory;
@@ -372,6 +374,10 @@ abstract class ArcanistBaseWorkflow {
 
   public function getArcanistConfiguration() {
     return $this->arcanistConfiguration;
+  }
+
+  public function getCommandSynopses() {
+    return get_class($this).": Undocumented";
   }
 
   public function getCommandHelp() {
@@ -690,61 +696,6 @@ abstract class ArcanistBaseWorkflow {
     }
   }
 
-  protected function chooseRevision(
-    array $revision_data,
-    $revision_id,
-    $prompt = null) {
-
-    $revisions = array();
-    foreach ($revision_data as $data) {
-      $ref = ArcanistDifferentialRevisionRef::newFromDictionary($data);
-      $revisions[$ref->getID()] = $ref;
-    }
-
-    if ($revision_id) {
-      $revision_id = $this->normalizeRevisionID($revision_id);
-      if (empty($revisions[$revision_id])) {
-        throw new ArcanistChooseInvalidRevisionException();
-      }
-      return $revisions[$revision_id];
-    }
-
-    if (!count($revisions)) {
-      throw new ArcanistChooseNoRevisionsException();
-    }
-
-    $repository_api = $this->getRepositoryAPI();
-
-    $candidates = $revisions;
-
-    if (count($candidates) == 1) {
-      $candidate = reset($candidates);
-      $revision_id = $candidate->getID();
-    }
-
-    if ($revision_id) {
-      return $revisions[$revision_id];
-    }
-
-    $revision_indexes = array_keys($revisions);
-
-    echo "\n";
-    $ii = 1;
-    foreach ($revisions as $revision) {
-      echo '  ['.$ii++.'] D'.$revision->getID().' '.$revision->getName()."\n";
-    }
-
-    while (true) {
-      $id = phutil_console_prompt($prompt);
-      $id = trim(strtoupper($id), 'D');
-      if (isset($revisions[$id])) {
-        return $revisions[$id];
-      }
-      if (isset($revision_indexes[$id - 1])) {
-        return $revisions[$revision_indexes[$id - 1]];
-      }
-    }
-  }
 
   protected function loadDiffBundleFromConduit(
     ConduitClient $conduit,
@@ -801,6 +752,10 @@ abstract class ArcanistBaseWorkflow {
     $repository_api = $this->getRepositoryAPI();
     $full_path = $repository_api->getPath($path);
     if (is_dir($full_path)) {
+      return null;
+    }
+
+    if (!file_exists($full_path)) {
       return null;
     }
 
@@ -926,25 +881,32 @@ abstract class ArcanistBaseWorkflow {
   }
 
   public static function getUserConfigurationFileLocation() {
-    return getenv('HOME').'/.arcrc';
+    if (phutil_is_windows()) {
+      return getenv('APPDATA').'/.arcrc';
+    } else {
+      return getenv('HOME').'/.arcrc';
+    }
   }
 
   public static function readUserConfigurationFile() {
     $user_config = array();
     $user_config_path = self::getUserConfigurationFileLocation();
     if (Filesystem::pathExists($user_config_path)) {
-      $mode = fileperms($user_config_path);
-      if (!$mode) {
-        throw new Exception("Unable to get perms of '{$user_config_path}'!");
-      }
-      if ($mode & 0177) {
-        // Mode should allow only owner access.
-        $prompt = "File permissions on your ~/.arcrc are too open. ".
-                  "Fix them by chmod'ing to 600?";
-        if (!phutil_console_confirm($prompt, $default_no = false)) {
-          throw new ArcanistUsageException("Set ~/.arcrc to file mode 600.");
+
+      if (!phutil_is_windows()) {
+        $mode = fileperms($user_config_path);
+        if (!$mode) {
+          throw new Exception("Unable to get perms of '{$user_config_path}'!");
         }
-        execx('chmod 600 %s', $user_config_path);
+        if ($mode & 0177) {
+          // Mode should allow only owner access.
+          $prompt = "File permissions on your ~/.arcrc are too open. ".
+                    "Fix them by chmod'ing to 600?";
+          if (!phutil_console_confirm($prompt, $default_no = false)) {
+            throw new ArcanistUsageException("Set ~/.arcrc to file mode 600.");
+          }
+          execx('chmod 600 %s', $user_config_path);
+        }
       }
 
       $user_config_data = Filesystem::readFile($user_config_path);
@@ -964,7 +926,10 @@ abstract class ArcanistBaseWorkflow {
 
     $path = self::getUserConfigurationFileLocation();
     Filesystem::writeFile($path, $json);
-    execx('chmod 600 %s', $path);
+
+    if (!phutil_is_windows()) {
+      execx('chmod 600 %s', $path);
+    }
   }
 
 
@@ -996,9 +961,19 @@ abstract class ArcanistBaseWorkflow {
    *
    * @param   list          List of explicitly provided paths.
    * @param   string|null   Revision name, if provided.
+   * @param   mask          Mask of ArcanistRepositoryAPI flags to exclude.
+   *                        Defaults to ArcanistRepositoryAPI::FLAG_UNTRACKED.
    * @return  list          List of paths the workflow should act on.
    */
-  protected function selectPathsForWorkflow(array $paths, $rev) {
+  protected function selectPathsForWorkflow(
+    array $paths,
+    $rev,
+    $omit_mask = null) {
+
+    if ($omit_mask === null) {
+      $omit_mask = ArcanistRepositoryAPI::FLAG_UNTRACKED;
+    }
+
     if ($paths) {
       $working_copy = $this->getWorkingCopy();
       foreach ($paths as $key => $path) {
@@ -1019,7 +994,7 @@ abstract class ArcanistBaseWorkflow {
 
       $paths = $repository_api->getWorkingCopyStatus();
       foreach ($paths as $path => $flags) {
-        if ($flags & ArcanistRepositoryAPI::FLAG_UNTRACKED) {
+        if ($flags & $omit_mask) {
           unset($paths[$path]);
         }
       }
@@ -1156,6 +1131,20 @@ abstract class ArcanistBaseWorkflow {
 
     $repository_api = $this->getRepositoryAPI();
     return $repository_api->getPath('.arc/'.$path);
+  }
+
+  protected function getRepositoryEncoding() {
+    if ($this->repositoryEncoding) {
+      return $this->repositoryEncoding;
+    }
+
+    $project_info = $this->getConduit()->callMethodSynchronous(
+      'arcanist.projectinfo',
+      array(
+        'name' => $this->getWorkingCopy()->getProjectID(),
+      ));
+    $this->repositoryEncoding = nonempty($project_info['encoding'], 'UTF-8');
+    return $this->repositoryEncoding;
   }
 
 }

@@ -29,9 +29,15 @@
  */
 final class ArcanistLiberateWorkflow extends ArcanistBaseWorkflow {
 
-  public function getCommandHelp() {
+  public function getCommandSynopses() {
     return phutil_console_format(<<<EOTEXT
       **liberate** [__path__]
+EOTEXT
+      );
+  }
+
+  public function getCommandHelp() {
+    return phutil_console_format(<<<EOTEXT
           Supports: libphutil
           Create or update a libphutil library, generating required metadata
           files like \__init__.php.
@@ -124,6 +130,8 @@ EOTEXT
 
     $readable = Filesystem::readablePath($path);
     echo "Using library root at '{$readable}'...\n";
+
+    $this->checkForLooseFiles($path);
 
     if ($this->getArgument('all')) {
       echo "Dropping module cache...\n";
@@ -331,6 +339,27 @@ EOTEXT
     }
 
     return (int)$unresolved;
+  }
+
+  /**
+   * Sanity check to catch people putting class files in the root of a libphutil
+   * library.
+   */
+  private function checkForLooseFiles($path) {
+    foreach (Filesystem::listDirectory($path) as $item) {
+      if (!preg_match('/\.php$/', $item)) {
+        // Not a ".php" file.
+        continue;
+      }
+      if (preg_match('/^__/', $item)) {
+        // Has magic '__' prefix.
+        continue;
+      }
+
+      echo phutil_console_wrap(
+        "WARNING: File '{$item}' is not in a module and won't be loaded. ".
+        "Put source files in subdirectories, not the top level directory.\n");
+    }
   }
 
 }

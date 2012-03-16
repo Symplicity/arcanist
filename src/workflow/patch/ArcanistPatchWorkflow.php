@@ -31,13 +31,19 @@ final class ArcanistPatchWorkflow extends ArcanistBaseWorkflow {
   private $source;
   private $sourceParam;
 
-  public function getCommandHelp() {
+  public function getCommandSynopses() {
     return phutil_console_format(<<<EOTEXT
       **patch** __D12345__
       **patch** __--revision__ __revision_id__
       **patch** __--diff__ __diff_id__
       **patch** __--patch__ __file__
       **patch** __--arcbundle__ __bundlefile__
+EOTEXT
+      );
+  }
+
+  public function getCommandHelp() {
+    return phutil_console_format(<<<EOTEXT
           Supports: git, svn, hg
           Apply the changes in a Differential revision, patchfile, or arc
           bundle to the working copy.
@@ -74,6 +80,11 @@ EOTEXT
         'paramtype' => 'file',
         'help' =>
           "Apply changes from a git patchfile or unified patchfile.",
+      ),
+      'encoding' => array(
+        'param' => 'encoding',
+        'help' =>
+          "Attempt to convert non UTF-8 patch into specified encoding.",
       ),
       'update' => array(
         'supports' => array(
@@ -343,7 +354,7 @@ EOTEXT
             $param);
           break;
       }
-    } catch (Exception $ex) {
+    } catch (ConduitClientException $ex) {
       if ($ex->getErrorCode() == 'ERR-INVALID-SESSION') {
         // Phabricator is not configured to allow anonymous access to
         // Differential.
@@ -353,6 +364,20 @@ EOTEXT
         throw $ex;
       }
     }
+
+    $try_encoding = nonempty($this->getArgument('encoding'), null);
+    if (!$try_encoding) {
+      try {
+        $try_encoding = $this->getRepositoryEncoding();
+      } catch (ConduitClientException $e) {
+        $try_encoding = null;
+      }
+    }
+
+    if ($try_encoding) {
+      $bundle->setEncoding($try_encoding);
+    }
+
     $force = $this->getArgument('force', false);
     if ($force) {
       // force means don't do any sanity checks about the patch
@@ -609,7 +634,10 @@ EOTEXT
     $prompt_message = null;
 
     // if we have a revision id the commit message is in differential
-    if ($revision_id) {
+
+    // TODO: See T848 for the authenticated stuff.
+    if ($revision_id && $this->isConduitAuthenticated()) {
+
       $conduit        = $this->getConduit();
       $commit_message = $conduit->callMethodSynchronous(
         'differential.getcommitmessage',
@@ -681,26 +709,26 @@ EOTEXT
 
     // Check to see if the bundle's base revision matches the working copy
     // base revision
-    $bundle_base_rev = $bundle->getBaseRevision();
-    if (empty($bundle_base_rev)) {
-      // this means $source is SOURCE_PATCH || SOURCE_BUNDLE w/ $version < 2
-      // they don't have a base rev so just do nothing
-    } else {
-      $repository_api = $this->getRepositoryAPI();
-      $source_base_rev = $repository_api->getWorkingCopyRevision();
-
-      if ($source_base_rev != $bundle_base_rev) {
+    $repository_api = $this->getRepositoryAPI();
+    if ($repository_api->supportsRelativeLocalCommits()) {
+      $bundle_base_rev = $bundle->getBaseRevision();
+      if (empty($bundle_base_rev)) {
+        // this means $source is SOURCE_PATCH || SOURCE_BUNDLE w/ $version < 2
+        // they don't have a base rev so just do nothing
+        $commit_exists = true;
+      } else {
+        $commit_exists =
+          $repository_api->hasLocalCommit($bundle_base_rev);
+      }
+      if (!$commit_exists) {
         // we have a problem...! lots of work because we need to ask
         // differential for revision information for these base revisions
         // to improve our error message.
         $bundle_base_rev_str = null;
+        $source_base_rev     = $repository_api->getWorkingCopyRevision();
         $source_base_rev_str = null;
 
-        // SVN doesn't store these hashes, so we're basically done already
-        // and will have a relatively "lame" error message
-        if ($repository_api instanceof ArcanistSubversionAPI) {
-          $hash_type = null;
-        } else if ($repository_api instanceof ArcanistGitAPI) {
+        if ($repository_api instanceof ArcanistGitAPI) {
           $hash_type = ArcanistDifferentialRevisionHash::HASH_GIT_COMMIT;
         } else if ($repository_api instanceof ArcanistMercurialAPI) {
           $hash_type = ArcanistDifferentialRevisionHash::HASH_MERCURIAL_COMMIT;
@@ -732,8 +760,8 @@ EOTEXT
 
         $ok = phutil_console_confirm(
           "This diff is against commit {$bundle_base_rev_str}, but the ".
-          "working copy is at {$source_base_rev_str}.  ".
-          "Still try to apply it?",
+          "commit is nowhere in the working copy. Try to apply it against ".
+          "the current working copy state? ({$source_base_rev_str})",
           $default_no = false
         );
         if (!$ok) {

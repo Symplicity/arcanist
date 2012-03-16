@@ -37,10 +37,16 @@ final class ArcanistDiffWorkflow extends ArcanistBaseWorkflow {
   private $revisionID;
   private $unitWorkflow;
 
-  public function getCommandHelp() {
+  public function getCommandSynopses() {
     return phutil_console_format(<<<EOTEXT
       **diff** [__paths__] (svn)
       **diff** [__commit__] (git, hg)
+EOTEXT
+      );
+  }
+
+  public function getCommandHelp() {
+    return phutil_console_format(<<<EOTEXT
           Supports: git, svn, hg
           Generate a Differential diff or revision from local changes.
 
@@ -51,7 +57,6 @@ final class ArcanistDiffWorkflow extends ArcanistBaseWorkflow {
           Under svn, you can choose to include only some of the modified files
           in the working copy in the diff by specifying their paths. If you
           omit paths, all changes are included in the diff.
-
 EOTEXT
       );
   }
@@ -68,7 +73,15 @@ EOTEXT
   }
 
   public function requiresRepositoryAPI() {
-    return !$this->isRawDiffSource();
+    if (!$this->isRawDiffSource()) {
+      return true;
+    }
+
+    if ($this->getArgument('use-commit-message')) {
+      return true;
+    }
+
+    return false;
   }
 
   public function getDiffID() {
@@ -228,6 +241,11 @@ EOTEXT
       'allow-untracked' => array(
         'help' =>
           "Skip checks for untracked files in the working copy.",
+      ),
+      'excuse' => array(
+        'param' => 'excuse',
+        'help' => 'Provide a prepared in advance excuse for any lints/tests'.
+          ' shall they fail.',
       ),
       'less-context' => array(
         'help' =>
@@ -441,7 +459,7 @@ EOTEXT
             'revision_id' => $result['revisionid'],
           ));
 
-        if ($this->requiresRepositoryAPI()) {
+        if (!$this->isRawDiffSource()) {
           $repository_api = $this->getRepositoryAPI();
           if (($repository_api instanceof ArcanistGitAPI) &&
               $this->shouldAmend()) {
@@ -634,7 +652,7 @@ EOTEXT
 
       // Remove all files with baserev "0"; these files are new.
       foreach ($bases as $path => $baserev) {
-        if ($bases[$path] == 0) {
+        if ($bases[$path] <= 0) {
           unset($bases[$path]);
         }
       }
@@ -733,7 +751,7 @@ EOTEXT
       }
     }
 
-    $try_encoding = null;
+    $try_encoding = nonempty($this->getArgument('encoding'), null);
 
     $utf8_problems = array();
     foreach ($changes as $change) {
@@ -746,29 +764,21 @@ EOTEXT
           // liberal about what they're willing to process.
           $is_binary = ArcanistDiffUtils::isHeuristicBinaryFile($corpus);
           if (!$is_binary) {
-            $try_encoding = nonempty($this->getArgument('encoding'), null);
-            if ($try_encoding === null) {
-              // Make a call to check if there's an encoding specified for this
-              // project.
+
+            if (!$try_encoding) {
               try {
-                  $project_info = $this->getConduit()->callMethodSynchronous(
-                      'arcanist.projectinfo',
-                      array(
-                          'name' => $this->getWorkingCopy()->getProjectID(),
-                      ));
-                  $try_encoding = nonempty($project_info['encoding'], false);
+                $try_encoding = $this->getRepositoryEncoding();
               } catch (ConduitClientException $e) {
-                  if ($e->getErrorCode() == 'ERR-BAD-ARCANIST-PROJECT') {
-                      echo phutil_console_wrap(
-                          "Lookup of encoding in arcanist project failed\n".
-                          $e->getMessage()
-                      );
-                      $try_encoding = false;
-                  } else {
-                      throw $e;
-                  }
+                if ($e->getErrorCode() == 'ERR-BAD-ARCANIST-PROJECT') {
+                  echo phutil_console_wrap(
+                    "Lookup of encoding in arcanist project failed\n".
+                    $e->getMessage());
+                } else {
+                  throw $e;
+                }
               }
             }
+
             if ($try_encoding) {
               // NOTE: This feature is HIGHLY EXPERIMENTAL and will cause a lot
               // of issues. Use it at your own risk.
@@ -1022,9 +1032,11 @@ EOTEXT
             "<bg:green>** LINT OKAY **</bg> No lint problems.\n");
           break;
         case ArcanistLintWorkflow::RESULT_WARNINGS:
-          $continue = phutil_console_confirm(
-            "Lint issued unresolved warnings. ".
-            "Provide explanation and continue?");
+          $msg = "Lint issued unresolved warnings. ";
+          $msg .= $this->getArgument('excuse')
+            ? "Ignore them?"
+            : "Provide explanation and continue?";
+          $continue = phutil_console_confirm($msg);
           if (!$continue) {
             throw new ArcanistUserAbortException();
           }
@@ -1032,8 +1044,11 @@ EOTEXT
         case ArcanistLintWorkflow::RESULT_ERRORS:
           echo phutil_console_format(
             "<bg:red>** LINT ERRORS **</bg> Lint raised errors!\n");
-          $continue = phutil_console_confirm(
-            "Lint issued unresolved errors! Provide explanation and continue?");
+          $msg = "Lint issued unresolved errors! ";
+          $msg .= $this->getArgument('excuse')
+            ? "Ignore lint errors?"
+            : "Provide explanation and continue?";
+          $continue = phutil_console_confirm($msg);
           if (!$continue) {
             throw new ArcanistUserAbortException();
           }
@@ -1042,15 +1057,19 @@ EOTEXT
 
       $this->unresolvedLint = $lint_workflow->getUnresolvedMessages();
       if ($continue) {
-        $template = "\n\n# Provide an explanation for these lint failures:\n";
-        foreach ($this->unresolvedLint as $message) {
-          $template = $template."# ".
-            $message->getPath().":".
-            $message->getLine()." ".
-            $message->getCode()." :: ".
-            $message->getDescription()."\n";
+        if ($this->getArgument('excuse')) {
+          $this->unitExcuse = $this->getArgument('excuse');
+        } else {
+          $template = "\n\n# Provide an explanation for these lint failures:\n";
+          foreach ($this->unresolvedLint as $message) {
+            $template = $template."# ".
+              $message->getPath().":".
+              $message->getLine()." ".
+              $message->getCode()." :: ".
+              $message->getDescription()."\n";
+          }
+          $this->lintExcuse = $this->getErrorExcuse($template);
         }
-        $this->lintExcuse = $this->getErrorExcuse($template);
       }
 
       return $lint_result;
@@ -1102,9 +1121,11 @@ EOTEXT
         case ArcanistUnitWorkflow::RESULT_FAIL:
           echo phutil_console_format(
             "<bg:red>** UNIT ERRORS **</bg> Unit testing raised errors!\n");
-          $continue = phutil_console_confirm(
-            "Unit test results include failures!".
-            " Explain test failures and continue?");
+          $msg = "Unit test results include failures! ";
+          $msg .= $this->getArgument('excuse')
+            ? "Ignore test failures?"
+            : "Explain test failures and continue?";
+          $continue = phutil_console_confirm($msg);
           if (!$continue) {
             throw new ArcanistUserAbortException();
           }
@@ -1114,22 +1135,26 @@ EOTEXT
 
       $this->testResults = $this->unitWorkflow->getTestResults();
       if ($explain) {
-        $template = "\n\n".
-          "# Provide an explanation for these unit test failures:\n";
-        foreach ($this->testResults as $test) {
-          $testResult = $test->getResult();
-          switch ($testResult) {
-            case ArcanistUnitTestResult::RESULT_FAIL:
-            case ArcanistUnitTestResult::RESULT_BROKEN:
-              $template = $template."# ".
-                $test->getName()." :: ".
-                $test->getResult()."\n";
-              break;
-            default:
-              break;
+        if ($this->getArgument('excuse')) {
+          $this->unitExcuse = $this->getArgument('excuse');
+        } else {
+          $template = "\n\n".
+            "# Provide an explanation for these unit test failures:\n";
+          foreach ($this->testResults as $test) {
+            $testResult = $test->getResult();
+            switch ($testResult) {
+              case ArcanistUnitTestResult::RESULT_FAIL:
+              case ArcanistUnitTestResult::RESULT_BROKEN:
+                $template = $template."# ".
+                  $test->getName()." :: ".
+                  $test->getResult()."\n";
+                break;
+              default:
+                break;
+            }
           }
+          $this->unitExcuse = $this->getErrorExcuse($template);
         }
-        $this->unitExcuse = $this->getErrorExcuse($template);
       }
 
       return $unit_result;
@@ -1596,7 +1621,7 @@ EOTEXT
   private function getDefaultCreateFields() {
     $empty = array(array(), array());
 
-    if (!$this->requiresRepositoryAPI()) {
+    if ($this->isRawDiffSource()) {
       return $empty;
     }
 
@@ -1644,7 +1669,7 @@ EOTEXT
   }
 
   private function getDefaultUpdateMessage() {
-    if (!$this->requiresRepositoryAPI()) {
+    if ($this->isRawDiffSource()) {
       return null;
     }
 
@@ -1832,7 +1857,7 @@ EOTEXT
     $source_path    = null;
     $branch         = null;
 
-    if ($this->requiresRepositoryAPI()) {
+    if (!$this->isRawDiffSource()) {
       $repository_api = $this->getRepositoryAPI();
 
       $base_revision  = $repository_api->getSourceControlBaseRevision();
