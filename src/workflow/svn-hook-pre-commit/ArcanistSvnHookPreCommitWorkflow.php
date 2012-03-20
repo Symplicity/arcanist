@@ -61,6 +61,11 @@ EOTEXT
       $transaction,
       $repository);
 
+    if (strlen(trim($commit_message)) < 12) {
+      echo "Please insert a meaningful (over 12 characters) message.";
+      return 1;
+    }
+
     if (strpos($commit_message, '@bypass-lint') !== false) {
       return 0;
     }
@@ -189,7 +194,7 @@ EOTEXT
       $config_file." (svnlook: {$transaction} {$repository})");
 
     $repository_api = new ArcanistSubversionHookAPI(
-      $project_root,
+      '',
       $transaction,
       $repository);
 
