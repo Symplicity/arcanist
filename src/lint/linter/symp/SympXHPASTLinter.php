@@ -44,20 +44,20 @@ class SympXHPASTLinter extends ArcanistLinter {
   public function getLintNameMap() {
     return array(
       self::LINT_PHP_SYNTAX_ERROR         => 'PHP Syntax Error!',
-      self::LINT_UNABLE_TO_PARSE          => 'Unable to Parse',
-      self::LINT_EXTRACT_USE              => 'Use of extract()',
-      self::LINT_NAMING_CONVENTIONS       => 'Naming Conventions',
-      self::LINT_IMPLICIT_CONSTRUCTOR     => 'Implicit Constructor',
-      self::LINT_FORMATTING_CONVENTIONS   => 'Formatting Conventions',
       self::LINT_DYNAMIC_DEFINE           => 'Dynamic define()',
-      self::LINT_STATIC_THIS              => 'Use of $this in Static Context',
       self::LINT_PREG_QUOTE_MISUSE        => 'Misuse of preg_quote()',
-      self::LINT_TODO_COMMENT             => 'TODO Comment',
       self::LINT_EXIT_EXPRESSION          => 'Exit Used as Expression',
       self::LINT_TAUTOLOGICAL_EXPRESSION  => 'Tautological Expression',
       self::LINT_PLUS_OPERATOR_ON_STRINGS => 'Not String Concatenation',
       self::LINT_DUPLICATE_KEYS_IN_ARRAY  => 'Duplicate Keys in Array',
       self::LINT_REUSED_ITERATORS         => 'Reuse of Iterator Variable',
+      self::LINT_TODO_COMMENT => 'TODO Comment',
+      self::LINT_UNABLE_TO_PARSE => 'Unable to Parse',
+      self::LINT_STATIC_THIS => 'Use of $this in Static Context',
+      self::LINT_FORMATTING_CONVENTIONS => 'Formatting Conventions',
+      self::LINT_NAMING_CONVENTIONS => 'Naming Conventions',
+      self::LINT_IMPLICIT_CONSTRUCTOR => 'Implicit Constructor',
+      self::LINT_EXTRACT_USE => 'Use of extract()',
     );
   }
 
@@ -71,11 +71,15 @@ class SympXHPASTLinter extends ArcanistLinter {
         => ArcanistLintSeverity::SEVERITY_ADVICE,
       self::LINT_UNABLE_TO_PARSE
         => ArcanistLintSeverity::SEVERITY_WARNING,
+      self::LINT_STATIC_THIS
+        => ArcanistLintSeverity::SEVERITY_WARNING,
       self::LINT_FORMATTING_CONVENTIONS
         => ArcanistLintSeverity::SEVERITY_WARNING,
       self::LINT_NAMING_CONVENTIONS
         => ArcanistLintSeverity::SEVERITY_WARNING,
       self::LINT_IMPLICIT_CONSTRUCTOR
+        => ArcanistLintSeverity::SEVERITY_WARNING,
+      self::LINT_EXTRACT_USE
         => ArcanistLintSeverity::SEVERITY_WARNING,
     );
   }
