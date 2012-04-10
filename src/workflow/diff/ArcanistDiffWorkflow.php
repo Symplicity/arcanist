@@ -52,7 +52,7 @@ EOTEXT
 
           Under git, you can specify a commit (like __HEAD^^^__ or __master__)
           and Differential will generate a diff against the merge base of that
-          commit and HEAD. If you omit the commit, the default is __HEAD^__.
+          commit and HEAD.
 
           Under svn, you can choose to include only some of the modified files
           in the working copy in the diff by specifying their paths. If you
@@ -92,16 +92,10 @@ EOTEXT
     return array(
       'message' => array(
         'short'       => 'm',
-        'supports'    => array(
-          'git',
-        ),
-        'nosupport'   => array(
-          'svn' => 'Edit revisions via the web interface when using SVN.',
-        ),
         'param'       => 'message',
         'help' =>
-          "When updating a revision under git, use the specified message ".
-          "instead of prompting.",
+          "When updating a revision, use the specified message instead of ".
+          "prompting.",
       ),
       'message-file' => array(
         'short' => 'F',
@@ -180,13 +174,6 @@ EOTEXT
       'update' => array(
         'param' => 'revision_id',
         'help'  => "Always update a specific revision.",
-      ),
-      'auto' => array(
-        'help' => "(Unstable!) Heuristically select --create or --update. ".
-                  "This may become the default behvaior of arc.",
-        'conflicts' => array(
-          'raw',
-        ),
       ),
       'nounit' => array(
         'help' =>
@@ -296,6 +283,12 @@ EOTEXT
       'no-amend' => array(
         'help' => 'Never amend commits in the working copy.',
       ),
+      'uncommitted' => array(
+        'help' => 'Include uncommitted changes without prompting.',
+        'supports' => array(
+          'hg',
+        ),
+      ),
       '*' => 'paths',
     );
   }
@@ -380,60 +373,21 @@ EOTEXT
             'edit' => true,
             'fields' => array(),
           ));
-        $remote_message = ArcanistDifferentialCommitMessage::newFromRawCorpus(
-          $remote_corpus);
-        $remote_message->pullDataFromConduit($conduit);
-
-        $sync = array('title', 'summary', 'testPlan');
-        foreach ($sync as $field) {
-          $local = $message->getFieldValue($field);
-          $remote_message->setFieldValue($field, $local);
-        }
 
         $should_edit = $this->getArgument('edit');
-
-/*
-
-  TODO: This is a complicated mess. We need to move to storing a checksum
-  of the non-auto-sync fields as they existed at original diff time and using
-  changes from that to detect user edits, not comparison of the client and
-  server values since they diverge without user edits (because of Herald
-  and explicit server-side user changes).
-
-        if (!$should_edit) {
-          $local_sum = $message->getChecksum();
-          $remote_sum = $remote_message->getChecksum();
-          if ($local_sum != $remote_sum) {
-            $prompt =
-              "You have made local changes to your commit message. Arcanist ".
-              "ignores most local changes. Instead, use the '--edit' flag to ".
-              "edit revision information. Edit revision information now?";
-            $should_edit = phutil_console_confirm(
-              $prompt,
-              $default_no = false);
-          }
-        }
-*/
-
-        $revision['fields'] = $remote_message->getFields();
-
         if ($should_edit) {
-          $updated_corpus = $conduit->callMethodSynchronous(
-            'differential.getcommitmessage',
-            array(
-              'revision_id' => $message->getRevisionID(),
-              'edit' => true,
-              'fields' => $message->getFields(),
-            ));
-          $new_text = id(new PhutilInteractiveEditor($updated_corpus))
+          $new_text = id(new PhutilInteractiveEditor($remote_corpus))
             ->setName('differential-edit-revision-info')
             ->editInteractively();
           $new_message = ArcanistDifferentialCommitMessage::newFromRawCorpus(
             $new_text);
-          $new_message->pullDataFromConduit($conduit);
-
-          $revision['fields'] = $new_message->getFields();
+        } else {
+          $new_message = ArcanistDifferentialCommitMessage::newFromRawCorpus(
+            $remote_corpus);
         }
+
+        $new_message->pullDataFromConduit($conduit);
+        $revision['fields'] = $new_message->getFields();
 
         $revision['id'] = $message->getRevisionID();
         $this->revisionID = $revision['id'];
@@ -497,6 +451,18 @@ EOTEXT
       if ($this->getArgument('less-context')) {
         $repository_api->setDiffLinesOfContext(3);
       }
+
+      if ($repository_api->supportsRelativeLocalCommits()) {
+
+        // Parse the relative commit as soon as we can, to avoid generating
+        // caches we need to drop later and expensive discovery operations
+        // (particularly in Mercurial).
+
+        $relative = $this->getArgument('paths');
+        if ($relative) {
+          $repository_api->parseRelativeLocalCommit($relative);
+        }
+      }
     }
 
     $output_json = $this->getArgument('json');
@@ -507,7 +473,33 @@ EOTEXT
     }
 
     if ($this->requiresWorkingCopy()) {
-      $this->requireCleanWorkingCopy();
+      try {
+        $this->requireCleanWorkingCopy();
+      } catch (ArcanistUncommittedChangesException $ex) {
+        if ($repository_api instanceof ArcanistMercurialAPI) {
+
+          // Some Mercurial users prefer to use it like SVN, where they don't
+          // commit changes before sending them for review. This would be a
+          // pretty bad workflow in Git, but Mercurial users are significantly
+          // more expert at change management.
+
+          $use_dirty_changes = false;
+          if ($this->getArgument('uncommitted')) {
+            // OK.
+          } else {
+            $ok = phutil_console_confirm(
+              "You have uncommitted changes in your working copy. You can ".
+              "include them in the diff, or abort and deal with them. (Use ".
+              "'--uncommitted' to include them and skip this prompt.) ".
+              "Do you want to include uncommitted changes in the diff?");
+            if (!$ok) {
+              throw $ex;
+            }
+          }
+
+          $repository_api->setIncludeDirectoryStateInDiffs(true);
+        }
+      }
     }
   }
 
@@ -518,10 +510,6 @@ EOTEXT
     }
 
     if ($this->getArgument('update')) {
-      return false;
-    }
-
-    if ($this->getArgument('auto')) {
       return false;
     }
 
@@ -586,7 +574,7 @@ EOTEXT
           "\n\n".
           "Modified 'svn:externals' files:".
           "\n\n".
-          '        '.phutil_console_wrap(implode("\n", $warn_externals), 8));
+          phutil_console_wrap(implode("\n", $warn_externals), 8));
         $prompt = "Generate a diff (with just local changes) anyway?";
         if (!phutil_console_confirm($prompt)) {
           throw new ArcanistUserAbortException();
@@ -596,8 +584,6 @@ EOTEXT
       }
 
     } else if ($repository_api->supportsRelativeLocalCommits()) {
-      $repository_api->parseRelativeLocalCommit(
-        $this->getArgument('paths', array()));
       $paths = $repository_api->getWorkingCopyStatus();
     } else {
       throw new Exception("Unknown VCS!");
@@ -699,6 +685,10 @@ EOTEXT
       $changes = $parser->parseDiff($diff);
     } else if ($repository_api instanceof ArcanistMercurialAPI) {
       $diff = $repository_api->getFullMercurialDiff();
+      if (!strlen($diff)) {
+        throw new ArcanistUsageException(
+          "No changes found. (Did you specify the wrong commit range?)");
+      }
       $changes = $parser->parseDiff($diff);
     } else {
       throw new Exception("Repository API is not supported.");
@@ -1193,7 +1183,6 @@ EOTEXT
   private function buildCommitMessage() {
     $is_create = $this->getArgument('create');
     $is_update = $this->getArgument('update');
-    $is_auto   = $this->getArgument('auto');
     $is_raw = $this->isRawDiffSource();
     $is_message = $this->getArgument('use-commit-message');
 
@@ -1201,7 +1190,7 @@ EOTEXT
       return $this->getCommitMessageFromCommit($is_message);
     }
 
-    if ($is_auto) {
+    if (!$is_raw && !$is_create && !$is_update) {
       $repository_api = $this->getRepositoryAPI();
       $revisions = $repository_api->loadWorkingCopyDifferentialRevisions(
         $this->getConduit(),
@@ -1231,21 +1220,13 @@ EOTEXT
       } else {
         return $this->getCommitMessageFromUser();
       }
-    }
-
-    if ($is_update) {
+    } else if ($is_update) {
       return $this->getCommitMessageFromRevision($is_update);
-    }
-
-    if ($is_raw) {
+    } else {
+      // This is --raw without enough info to create a revision, so force just
+      // a diff.
       return null;
     }
-
-    if (!$this->shouldOnlyCreateDiff()) {
-      return $this->getGitCommitMessage();
-    }
-
-    return null;
   }
 
 
@@ -1319,10 +1300,13 @@ EOTEXT
     }
 
     $issues = array(
-      'Describe this revision.',
+      'NEW DIFFERENTIAL REVISION',
+      'Describe the changes in this new revision.',
       '',
-      'If you intended to update a existing revision, use ',
-      '`arc diff --update <revision>`.',
+      'arc could not identify any existing revision in your working copy.',
+      'If you intended to update an existing revision, use:',
+      '',
+      '  $ arc diff --update <revision>',
     );
     if ($notes) {
       $issues = array_merge($issues, array(''), $notes);
@@ -1472,6 +1456,13 @@ EOTEXT
       return $comments;
     }
 
+    if ($this->getArgument('raw')) {
+      throw new ArcanistUsageException(
+        "When using '--raw' to update a revision, specify an update message ".
+        "with '--message'. (Normally, we'd launch an editor to ask you for a ".
+        "message, but can not do that because stdin is the diff source.)");
+    }
+
     // When updating a revision using git without specifying '--message', try
     // to prefill with the message in HEAD if it isn't a template message. The
     // idea is that if you do:
@@ -1502,100 +1493,6 @@ EOTEXT
     }
 
     return $comments;
-  }
-
-
-  /**
-   * @task message
-   */
-  private function getGitCommitMessage() {
-    $conduit = $this->getConduit();
-    $repository_api = $this->getRepositoryAPI();
-
-    $commit_messages = $this->getLocalGitCommitMessages();
-
-    $problems = array();
-    $parsed = array();
-    $hashes = array();
-    foreach ($commit_messages as $key => $change) {
-      $problems[$key] = array();
-      $hashes[$key] = $change->getCommitHash();
-
-      try {
-        $message = ArcanistDifferentialCommitMessage::newFromRawCorpus(
-          $change->getMetadata('message'));
-
-        $message->pullDataFromConduit($conduit);
-
-        $parsed[$key] = $message;
-      } catch (ArcanistDifferentialCommitMessageParserException $ex) {
-        foreach ($ex->getParserErrors() as $problem) {
-          $problems[$key][] = $problem;
-        }
-        continue;
-      }
-    }
-
-    $valid = array();
-    foreach ($problems as $key => $problem_list) {
-      if ($problem_list) {
-        continue;
-      }
-      $valid[$key] = $parsed[$key];
-    }
-
-    $blessed = null;
-    if (count($valid) == 1) {
-      $blessed = head($valid);
-    } else if (count($valid) > 1) {
-      echo phutil_console_wrap(
-        "Changes in the specified commit range include more than one commit ".
-        "with a valid template commit message. Choose the message you want ".
-        "to use (you can also use the -C flag).\n\n");
-      foreach ($valid as $key => $message) {
-        $hash = substr($hashes[$key], 0, 7);
-        $title = $commit_messages[$key]->getMetadata('message');
-        $title = head(explode("\n", trim($title)));
-        $title = phutil_utf8_shorten($title, 64);
-        echo "    {$hash}  {$title}\n";
-      }
-
-      do {
-        $choose = phutil_console_prompt('Use which commit message?');
-        foreach ($valid as $key => $message) {
-          if (!strncmp($hashes[$key], $choose, strlen($choose))) {
-            $blessed = $valid[$key];
-            break;
-          }
-        }
-      } while (!$blessed);
-    }
-
-    if (!$blessed) {
-      $desc = implode("\n", array_mergev($problems));
-      if (count($problems) > 1) {
-        throw new ArcanistUsageException(
-          "All changes between the specified commits have template parsing ".
-          "problems:\n\n".$desc."\n\nIf you only want to create a diff ".
-          "(not a revision), use --preview to ignore commit messages.");
-      } else if (count($problems) == 1) {
-        $user_guide = 'http://phabricator.com/docs/phabricator/'.
-                      'article/Arcanist_User_Guide.html';
-        throw new ArcanistUsageException(
-          "Commit message is not properly formatted:\n\n".$desc."\n\n".
-          "You should use the standard git commit template to provide a ".
-          "commit message. If you only want to create a diff (not a ".
-          "revision), use --preview to ignore commit messages.\n\n".
-          "See this document for instructions on configuring the commit ".
-          "template:\n\n    {$user_guide}\n");
-      }
-    }
-
-    if ($blessed) {
-      $this->validateCommitMessage($blessed);
-    }
-
-    return $blessed;
   }
 
   private function getLocalGitCommitMessages() {
@@ -1629,6 +1526,8 @@ EOTEXT
     if ($repository_api instanceof ArcanistGitAPI) {
       return $this->getGitCreateFields();
     }
+
+    // TODO: Load default fields in Mercurial.
 
     return $empty;
   }
@@ -1730,7 +1629,7 @@ EOTEXT
       }
 
       // Otherwise, this looks new, so it's a usable commit message.
-      $usable[] = $message;
+      $usable[] = $text;
     }
 
     if (!$usable) {

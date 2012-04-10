@@ -687,9 +687,9 @@ abstract class ArcanistBaseWorkflow {
 
     $uncommitted = $api->getUncommittedChanges();
     if ($uncommitted) {
-      throw new ArcanistUsageException(
-        "You have uncommitted changes in this branch. Commit (or revert) them ".
-        "before proceeding.\n\n".
+      throw new ArcanistUncommittedChangesException(
+        "You have uncommitted changes in this working copy. Commit (or ".
+        "revert) them before proceeding.\n\n".
         $working_copy_desc.
         "  Uncommitted changes in working copy\n".
         "    ".implode("\n    ", $uncommitted)."\n");
@@ -1012,6 +1012,7 @@ abstract class ArcanistBaseWorkflow {
     return implode('', $list);
   }
 
+
 /* -(  Scratch Files  )------------------------------------------------------ */
 
 
@@ -1023,22 +1024,10 @@ abstract class ArcanistBaseWorkflow {
    * @task scratch
    */
   protected function readScratchFile($path) {
-    $full_path = $this->getScratchFilePath($path);
-    if (!$full_path) {
+    if (!$this->repositoryAPI) {
       return false;
     }
-
-    if (!Filesystem::pathExists($full_path)) {
-      return false;
-    }
-
-    try {
-      $result = Filesystem::readFile($full_path);
-    } catch (FilesystemException $ex) {
-      return false;
-    }
-
-    return $result;
+    return $this->getRepositoryAPI()->readScratchFile($path);
   }
 
 
@@ -1052,26 +1041,10 @@ abstract class ArcanistBaseWorkflow {
    * @task scratch
    */
   protected function writeScratchFile($path, $data) {
-    $dir = $this->getScratchFilePath('');
-    if (!$dir) {
+    if (!$this->repositoryAPI) {
       return false;
     }
-
-    if (!Filesystem::pathExists($dir)) {
-      try {
-        execx('mkdir %s', $dir);
-      } catch (Exception $ex) {
-        return false;
-      }
-    }
-
-    try {
-      Filesystem::writeFile($this->getScratchFilePath($path), $data);
-    } catch (FilesystemException $ex) {
-      return false;
-    }
-
-    return true;
+    return $this->getRepositoryAPI()->writeScratchFile($path, $data);
   }
 
 
@@ -1083,18 +1056,10 @@ abstract class ArcanistBaseWorkflow {
    * @task scratch
    */
   protected function removeScratchFile($path) {
-    $full_path = $this->getScratchFilePath($path);
-    if (!$full_path) {
+    if (!$this->repositoryAPI) {
       return false;
     }
-
-    try {
-      Filesystem::remove($full_path);
-    } catch (FilesystemException $ex) {
-      return false;
-    }
-
-    return true;
+    return $this->getRepositoryAPI()->removeScratchFile($path);
   }
 
 
@@ -1106,14 +1071,10 @@ abstract class ArcanistBaseWorkflow {
    * @task scratch
    */
   protected function getReadableScratchFilePath($path) {
-    $full_path = $this->getScratchFilePath($path);
-    if ($full_path) {
-      return Filesystem::readablePath(
-        $full_path,
-        $this->getRepositoryAPI()->getPath());
-    } else {
+    if (!$this->repositoryAPI) {
       return false;
     }
+    return $this->getRepositoryAPI()->getReadableScratchFilePath($path);
   }
 
 
@@ -1128,9 +1089,7 @@ abstract class ArcanistBaseWorkflow {
     if (!$this->repositoryAPI) {
       return false;
     }
-
-    $repository_api = $this->getRepositoryAPI();
-    return $repository_api->getPath('.arc/'.$path);
+    return $this->getRepositoryAPI()->getScratchFilePath($path);
   }
 
   protected function getRepositoryEncoding() {

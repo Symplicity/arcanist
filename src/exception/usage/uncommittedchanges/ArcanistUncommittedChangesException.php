@@ -16,16 +16,6 @@
  * limitations under the License.
  */
 
-$include_path = ini_get('include_path');
+final class ArcanistUncommittedChangesException extends ArcanistUsageException {
 
-$parent_dir = dirname(dirname(dirname(__FILE__)));
-
-ini_set('include_path', $include_path.PATH_SEPARATOR.$parent_dir);
-@include_once 'libphutil/scripts/__init_script__.php';
-if (!@constant('__LIBPHUTIL__')) {
-  echo "ERROR: Unable to load libphutil. Update your PHP 'include_path' to ".
-       "include the parent directory of libphutil/.\n";
-  exit(1);
 }
-
-phutil_load_library(dirname(dirname(__FILE__)).'/src/');

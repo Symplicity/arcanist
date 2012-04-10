@@ -31,13 +31,16 @@ final class ArcanistBundle {
   private $baseRevision;
   private $revisionID;
   private $encoding;
+  private $loadFileDataCallback;
 
   public function setConduit(ConduitClient $conduit) {
     $this->conduit = $conduit;
+    return $this;
   }
 
   public function setProjectID($project_id) {
     $this->projectID = $project_id;
+    return $this;
   }
 
   public function getProjectID() {
@@ -46,6 +49,7 @@ final class ArcanistBundle {
 
   public function setBaseRevision($base_revision) {
     $this->baseRevision = $base_revision;
+    return $this;
   }
 
   public function setEncoding($encoding) {
@@ -426,8 +430,18 @@ final class ArcanistBundle {
     $ii = 0;
     $jj = 0;
     while ($ii < $n) {
-      for ($jj = $ii; $jj < $n && $lines[$jj][0] == ' '; ++$jj) {
-        // Skip lines until we find the first line with changes.
+      // Skip lines until we find the next line with changes. Note: this skips
+      // both ' ' (no changes) and '\' (no newline at end of file) lines. If we
+      // don't skip the latter, we may incorrectly generate a terminal hunk
+      // that has no actual change information when a file doesn't have a
+      // terminal newline and not changed near the end of the file. 'patch' will
+      // fail to apply the diff if we generate a hunk that does not actually
+      // contain changes.
+      for ($jj = $ii; $jj < $n; ++$jj) {
+        $char = $lines[$jj][0];
+        if ($char == '-' || $char == '+') {
+          break;
+        }
       }
       if ($jj >= $n) {
         break;
@@ -536,7 +550,7 @@ final class ArcanistBundle {
   }
 
   private function buildHunkChanges(array $hunks) {
-
+    assert_instances_of($hunks, 'ArcanistDiffHunk');
     $result = array();
     foreach ($hunks as $hunk) {
       $small_hunks = $this->breakHunkIntoSmallHunks($hunk);
@@ -570,7 +584,16 @@ final class ArcanistBundle {
     return implode("\n", $result);
   }
 
+  public function setLoadFileDataCallback($callback) {
+    $this->loadFileDataCallback = $callback;
+    return $this;
+  }
+
   private function getBlob($phid) {
+    if ($this->loadFileDataCallback) {
+      return call_user_func($this->loadFileDataCallback, $phid);
+    }
+
     if ($this->diskPath) {
       list($blob_data) = execx('tar xfO %s blobs/%s', $this->diskPath, $phid);
       return $blob_data;
@@ -586,7 +609,7 @@ final class ArcanistBundle {
       return base64_decode($data_base64);
     }
 
-    throw new Exception("Nowhere to load blob '{$phid} from!");
+    throw new Exception("Nowhere to load blob '{$phid}' from!");
   }
 
   private function buildBinaryChange(ArcanistDiffChange $change) {

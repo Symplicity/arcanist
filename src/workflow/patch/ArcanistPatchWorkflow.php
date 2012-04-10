@@ -233,11 +233,9 @@ EOTEXT
     foreach ($suffixes as $suffix) {
       $proposed_name = $base_name.$suffix;
 
-      list($err) = exec_manual(
-        '(cd %s; git rev-parse --verify %s)',
-        $repository_api->getPath(),
-        $proposed_name
-      );
+      list($err) = $repository_api->execManualLocal(
+        'rev-parse --verify %s',
+        $proposed_name);
 
       // no error means git rev-parse found a branch
       if (!$err) {
@@ -269,28 +267,28 @@ EOTEXT
     // verify the base revision is valid
     // in a working copy that uses the git-svn bridge, the base revision might
     // be a svn uri instead of a git ref
-    list($err) = exec_manual(
-      '(cd %s; git rev-parse --verify %s)',
-      $repository_api->getPath(),
-      $base_revision
-    );
+
+    // NOTE: Use 'cat-file', not 'rev-parse --verify', because 'rev-parse'
+    // always "verifies" any properly-formatted commit even if it does not
+    // exist.
+    list($err) = $repository_api->execManualLocal(
+      'cat-file -t %s',
+      $base_revision);
 
     if ($base_revision && !$err) {
-      execx(
-        '(cd %s; git checkout -b %s %s)',
-        $repository_api->getPath(),
+      $repository_api->execxLocal(
+        'checkout -b %s %s',
         $branch_name,
         $base_revision);
     } else {
-      execx(
-        '(cd %s; git checkout -b %s)',
-        $repository_api->getPath(),
+      $repository_api->execxLocal(
+        'checkout -b %s',
         $branch_name);
     }
 
     echo phutil_console_format(
-      "Created and checked out branch {$branch_name}.\n"
-    );
+      "Created and checked out branch %s.\n",
+      $branch_name);
   }
 
   private function shouldUpdateWorkingCopy() {
@@ -298,27 +296,9 @@ EOTEXT
   }
 
   private function updateWorkingCopy() {
-    $repository_api = $this->getRepositoryAPI();
-    if ($repository_api instanceof ArcanistSubversionAPI) {
-      execx(
-        '(cd %s; svn up)',
-        $repository_api->getPath());
-      $message = "Updated to HEAD.  ";
-    } else if ($repository_api instanceof ArcanistGitAPI) {
-      execx(
-        '(cd %s; git pull)',
-        $repository_api->getPath());
-      $message = "Updated to HEAD.  ";
-    } else if ($repository_api instanceof ArcanistMercurialAPI) {
-      execx(
-        '(cd %s; hg up)',
-        $repository_api->getPath());
-      $message = "Updated to tip.  ";
-    } else {
-      throw new Exception('Unknown version control system.');
-    }
-
-    echo phutil_console_format($message."\n");
+    echo "Updating working copy...\n";
+    $this->getRepositoryAPI()->updateWorkingCopy();
+    echo "Done.\n";
   }
 
   public function run() {
@@ -367,10 +347,12 @@ EOTEXT
 
     $try_encoding = nonempty($this->getArgument('encoding'), null);
     if (!$try_encoding) {
-      try {
-        $try_encoding = $this->getRepositoryEncoding();
-      } catch (ConduitClientException $e) {
-        $try_encoding = null;
+      if ($this->requiresConduit()) {
+        try {
+          $try_encoding = $this->getRepositoryEncoding();
+        } catch (ConduitClientException $e) {
+          $try_encoding = null;
+        }
       }
     }
 
@@ -494,6 +476,9 @@ EOTEXT
         $this->createParentDirectoryOf($add);
       }
 
+      // TODO: The SVN patch workflow likely does not work on windows because
+      // of the (cd ...) stuff.
+
       foreach ($copies as $copy) {
         list($src, $dst) = $copy;
         passthru(
@@ -593,17 +578,32 @@ EOTEXT
 
       return $patch_err;
     } else if ($repository_api instanceof ArcanistGitAPI) {
-      $future = new ExecFuture(
-        '(cd %s; git apply --index --reject)',
-        $repository_api->getPath());
+      $future = $repository_api->execFutureLocal(
+        'apply --index --reject');
       $future->write($bundle->toGitPatch());
-      $future->resolvex();
+
+      try {
+        $future->resolvex();
+      } catch (CommandException $ex) {
+        echo phutil_console_format(
+          "\n<bg:red>** Patch Failed! **</bg>\n");
+        $stderr = $ex->getStdErr();
+        if (preg_match('/already exists in working directory/', $stderr)) {
+          echo phutil_console_wrap(
+            phutil_console_format(
+              "\n<bg:yellow>** WARNING **</bg> This patch may have failed ".
+              "because it attempts to change the case of a filename (for ".
+              "instance, from 'example.c' to 'Example.c'). Git can not apply ".
+              "patches like this on case-insensitive filesystems. You must ".
+              "apply this patch manually.\n"));
+        }
+        throw $ex;
+      }
 
       if ($this->shouldCommit()) {
         $commit_message = $this->getCommitMessage($bundle);
-        $future = new ExecFuture(
-          '(cd %s; git commit -a -F -)',
-          $repository_api->getPath());
+        $future = $repository_api->execFutureLocal(
+          'commit -a -F -');
         $future->write($commit_message);
         $future->resolvex();
         $verb = 'committed';
@@ -613,9 +613,8 @@ EOTEXT
       echo phutil_console_format(
         "<bg:green>** OKAY **</bg> Successfully {$verb} patch.\n");
     } else if ($repository_api instanceof ArcanistMercurialAPI) {
-      $future = new ExecFuture(
-        '(cd %s; hg import --no-commit -)',
-        $repository_api->getPath());
+      $future = $repository_api->execFutureLocal(
+        'import --no-commit -');
       $future->write($bundle->toGitPatch());
       $future->resolvex();
 
