@@ -128,8 +128,20 @@ final class ArcanistGitAPI extends ArcanistRepositoryAPI {
         return $this->relativeCommit;
       }
 
-      $default_relative = $this->readScratchFile('default-relative-commit');
       $do_write = false;
+      $default_relative = null;
+
+      list($err, $upstream) = $this->execManualLocal(
+        "rev-parse --abbrev-ref --symbolic-full-name '@{upstream}'");
+
+      if (!$err) {
+        $default_relative = trim($upstream);
+      }
+
+      if (!$default_relative) {
+        $default_relative = $this->readScratchFile('default-relative-commit');
+        $default_relative = trim($default_relative);
+      }
 
       if (!$default_relative) {
         $working_copy = $this->getWorkingCopyIdentity();
@@ -734,10 +746,12 @@ final class ArcanistGitAPI extends ArcanistRepositoryAPI {
     }
 
     // If we still didn't succeed, try to find revisions by branch name.
+    $project = $this->getWorkingCopyIdentity()->getProjectID();
     $results = $conduit->callMethodSynchronous(
       'differential.query',
       $query + array(
-        'branches' => array($this->getBranchName()),
+        'branches'          => array($this->getBranchName()),
+        'arcanistProjects'  => array($project),
       ));
 
     return $results;
