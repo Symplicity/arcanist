@@ -34,7 +34,6 @@ class SympXHPASTLinter extends ArcanistLinter {
   const LINT_DUPLICATE_KEYS_IN_ARRAY  = 7;
   const LINT_REUSED_ITERATORS         = 8;
   const LINT_IMPLICIT_CONSTRUCTOR     = 9;
-  const LINT_DYNAMIC_DEFINE           = 10;
   const LINT_PREG_QUOTE_MISUSE        = 11;
   const LINT_EXIT_EXPRESSION          = 12;
   const LINT_NAMING_CONVENTIONS       = 13;
@@ -44,7 +43,6 @@ class SympXHPASTLinter extends ArcanistLinter {
   public function getLintNameMap() {
     return array(
       self::LINT_PHP_SYNTAX_ERROR         => 'PHP Syntax Error!',
-      self::LINT_DYNAMIC_DEFINE           => 'Dynamic define()',
       self::LINT_PREG_QUOTE_MISUSE        => 'Misuse of preg_quote()',
       self::LINT_EXIT_EXPRESSION          => 'Exit Used as Expression',
       self::LINT_TAUTOLOGICAL_EXPRESSION  => 'Tautological Expression',
@@ -126,10 +124,8 @@ class SympXHPASTLinter extends ArcanistLinter {
     $root = $this->trees[$path]->getRootNode();
 
     $this->lintUseOfThisInStaticMethods($root);
-    $this->lintDynamicDefines($root);
     //$this->lintSurpriseConstructors($root);
     //$this->lintTODOComments($root);
-    //$this->lintExitExpressions($root);
     $this->lintSpaceAroundBinaryOperators($root);
     $this->lintSpaceAfterControlStatementKeywords($root);
     $this->lintParenthesesShouldHugExpressions($root);
@@ -601,23 +597,6 @@ class SympXHPASTLinter extends ArcanistLinter {
     }
   }
 
-  protected function lintDynamicDefines($root) {
-    $calls = $root->selectDescendantsOfType('n_FUNCTION_CALL');
-    foreach ($calls as $call) {
-      $name = $call->getChildByIndex(0)->getConcreteString();
-      if (strtolower($name) == 'define') {
-        $parameter_list = $call->getChildOfType(1, 'n_CALL_PARAMETER_LIST');
-        $defined = $parameter_list->getChildByIndex(0);
-        if (!$defined->isStaticScalar()) {
-          $this->raiseLintAtNode(
-            $defined,
-            self::LINT_DYNAMIC_DEFINE,
-            'First argument to define() must be a string literal.');
-        }
-      }
-    }
-  }
-
   protected function lintUseOfThisInStaticMethods($root) {
     $classes = $root->selectDescendantsOfType('n_CLASS_DECLARATION');
     foreach ($classes as $class) {
@@ -680,36 +659,6 @@ class SympXHPASTLinter extends ArcanistLinter {
             self::LINT_PREG_QUOTE_MISUSE,
             'You should always pass two arguments to preg_quote(), so that ' .
             'preg_quote() knows which delimiter to escape.');
-        }
-      }
-    }
-  }
-
-  /**
-   * Exit is parsed as an expression, but using it as such is almost always
-   * wrong. That is, this is valid:
-   *
-   *    strtoupper(33 * exit - 6);
-   *
-   * When exit is used as an expression, it causes the program to terminate with
-   * exit code 0. This is likely not what is intended; these statements have
-   * different effects:
-   *
-   *    exit(-1);
-   *    exit -1;
-   *
-   * The former exits with a failure code, the latter with a success code!
-   */
-  protected function lintExitExpressions($root) {
-    $unaries = $root->selectDescendantsOfType('n_UNARY_PREFIX_EXPRESSION');
-    foreach ($unaries as $unary) {
-      $operator = $unary->getChildByIndex(0)->getConcreteString();
-      if (strtolower($operator) == 'exit') {
-        if ($unary->getParentNode()->getTypeName() != 'n_STATEMENT') {
-          $this->raiseLintAtNode(
-            $unary,
-            self::LINT_EXIT_EXPRESSION,
-            "Use exit as a statement, not an expression.");
         }
       }
     }
