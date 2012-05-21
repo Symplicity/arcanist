@@ -25,7 +25,7 @@ final class ArcanistLandWorkflow extends ArcanistBaseWorkflow {
 
   public function getCommandSynopses() {
     return phutil_console_format(<<<EOTEXT
-      **land** [__options__] __branch__ [--onto __master__]
+      **land** [__options__] [__branch__] [--onto __master__]
 EOTEXT
       );
   }
@@ -36,7 +36,8 @@ EOTEXT
 
           Land an accepted change (currently sitting in local feature branch
           __branch__) onto __master__ and push it to the remote. Then, delete
-          the feature branch.
+          the feature branch. If you omit __branch__, the current branch will
+          be used.
 
           In mutable repositories, this will perform a --squash merge (the
           entire branch will be represented by one commit on __master__). In
@@ -96,6 +97,13 @@ EOTEXT
           'merge' => '--merge and --squash are conflicting merge strategies.',
         ),
       ),
+      'delete-remote' => array(
+        'help'      => 'Delete the feature branch in the remote after '.
+                       'landing it.',
+        'conflicts' => array(
+          'keep-branch' => true,
+        ),
+      ),
       'revision' => array(
         'param' => 'id',
         'help'  => 'Use the message from a specific revision, rather than '.
@@ -106,7 +114,20 @@ EOTEXT
   }
 
   public function run() {
+    $repository_api = $this->getRepositoryAPI();
+    if (!($repository_api instanceof ArcanistGitAPI)) {
+      throw new ArcanistUsageException("'arc land' only supports git.");
+    }
+
     $branch = $this->getArgument('branch');
+    if (empty($branch)) {
+      $branch = $repository_api->getBranchName();
+      if ($branch) {
+        echo "Landing current branch '{$branch}'.\n";
+        $branch = array($branch);
+      }
+    }
+
     if (count($branch) !== 1) {
       throw new ArcanistUsageException(
         "Specify exactly one branch to land changes from.");
@@ -120,17 +141,20 @@ EOTEXT
     $remote = $this->getArgument('remote', 'origin');
     $onto = $this->getArgument('onto', $onto_default);
 
+    if ($onto == $branch) {
+      throw new ArcanistUsageException(
+        "You can not land a branch onto itself -- you are trying to land ".
+        "'{$branch}' onto '{$onto}'. For more information on how to push ".
+        "changes, see 'Pushing and Closing Revisions' in ".
+        "'Arcanist User Guide: arc diff' in the documentation.");
+    }
+
     if ($this->getArgument('merge')) {
       $use_squash = false;
     } else if ($this->getArgument('squash')) {
       $use_squash = true;
     } else {
       $use_squash = !$this->isHistoryImmutable();
-    }
-
-    $repository_api = $this->getRepositoryAPI();
-    if (!($repository_api instanceof ArcanistGitAPI)) {
-      throw new ArcanistUsageException("'arc land' only supports git.");
     }
 
     list($err) = $repository_api->execManualLocal(
@@ -253,8 +277,7 @@ EOTEXT
       // the right message.
       chdir($repository_api->getPath());
       $err = phutil_passthru(
-        'git merge --no-ff -m %s %s',
-        $message,
+        'git merge --no-ff --no-commit %s',
         $branch);
       if ($err) {
         throw new ArcanistUsageException(
@@ -267,10 +290,13 @@ EOTEXT
       $repository_api->execxLocal(
         'merge --squash --ff-only %s',
         $branch);
-      $repository_api->execxLocal(
-        'commit -m %s',
-        $message);
     }
+
+    $tmp_file = new TempFile();
+    Filesystem::writeFile($tmp_file, $message);
+    $repository_api->execxLocal(
+      'commit -F %s',
+      $tmp_file);
 
     if ($this->getArgument('hold')) {
       echo phutil_console_format(
@@ -316,6 +342,29 @@ EOTEXT
       $repository_api->execxLocal(
         'branch -D %s',
         $branch);
+
+      if ($this->getArgument('delete-remote')) {
+        list($err, $ref) = $repository_api->execManualLocal(
+          'rev-parse --verify %s/%s',
+          $remote,
+          $branch);
+
+        if ($err) {
+          echo "No remote feature branch to clean up.\n";
+        } else {
+
+          // NOTE: In Git, you delete a remote branch by pushing it with a
+          // colon in front of its name:
+          //
+          //   git push <remote> :<branch>
+
+          echo "Cleaning up remote feature branch...\n";
+          $repository_api->execxLocal(
+            'push %s :%s',
+            $remote,
+            $branch);
+        }
+      }
     }
 
     // If we were on some branch A and the user ran "arc land B", switch back

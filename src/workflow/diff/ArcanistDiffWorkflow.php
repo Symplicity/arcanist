@@ -300,8 +300,10 @@ EOTEXT
         ),
       ),
       'verbatim' => array(
-        'help' => 'Try to use the working copy commit message verbatim when '.
-                  'creating a revision, without prompting to edit it.',
+        'help' => 'When creating a revision, try to use the working copy '.
+                  'commit message verbatim, without prompting to edit it. '.
+                  'When updating a revision, update some fields from the '.
+                  'local commit message.',
         'supports' => array(
           'hg',
           'git',
@@ -313,7 +315,6 @@ EOTEXT
           'preview'             => true,
           'raw'                 => true,
           'raw-command'         => true,
-          'message'             => true,
           'message-file'        => true,
         ),
       ),
@@ -391,6 +392,18 @@ EOTEXT
       );
 
       if ($message->getRevisionID()) {
+
+        // With '--verbatim', pass the (possibly modified) local fields. This
+        // allows the user to edit some fields (like "title" and "summary")
+        // locally without '--edit' and have changes automatically synchronized.
+        // Without '--verbatim', we do not update the revision to reflect local
+        // commit message changes.
+        if ($this->getArgument('verbatim')) {
+          $use_fields = $message->getFields();
+        } else {
+          $use_fields = array();
+        }
+
         // TODO: This is silly -- we're getting a text corpus from the server
         // and then sending it right back to be parsed. This should be a
         // single call.
@@ -398,21 +411,19 @@ EOTEXT
           'differential.getcommitmessage',
           array(
             'revision_id' => $message->getRevisionID(),
-            'edit' => true,
-            'fields' => array(),
+            'edit'        => 'edit',
+            'fields'      => $use_fields,
           ));
 
         $should_edit = $this->getArgument('edit');
         if ($should_edit) {
-          $new_text = id(new PhutilInteractiveEditor($remote_corpus))
+          $remote_corpus = id(new PhutilInteractiveEditor($remote_corpus))
             ->setName('differential-edit-revision-info')
             ->editInteractively();
-          $new_message = ArcanistDifferentialCommitMessage::newFromRawCorpus(
-            $new_text);
-        } else {
-          $new_message = ArcanistDifferentialCommitMessage::newFromRawCorpus(
-            $remote_corpus);
         }
+
+        $new_message = ArcanistDifferentialCommitMessage::newFromRawCorpus(
+          $remote_corpus);
 
         $new_message->pullDataFromConduit($conduit);
         $revision['fields'] = $new_message->getFields();
@@ -855,11 +866,32 @@ EOTEXT
     }
 
     foreach ($changes as $change) {
+      $path = $change->getCurrentPath();
+
+      // Certain types of changes (moves and copies) don't contain change data
+      // when expressed in raw "git diff" form. Augment any such diffs with
+      // textual data.
+      if ($change->getNeedsSyntheticGitHunks()) {
+        $diff = $repository_api->getRawDiffText($path, $moves = false);
+        $parser = new ArcanistDiffParser();
+        $raw_changes = $parser->parseDiff($diff);
+        foreach ($raw_changes as $raw_change) {
+          if ($raw_change->getCurrentPath() == $path) {
+            $change->setFileType($raw_change->getFileType());
+            foreach ($raw_change->getHunks() as $hunk) {
+              $change->addHunk($hunk);
+            }
+            break;
+          }
+        }
+
+        $change->setNeedsSyntheticGitHunks(false);
+      }
+
       if ($change->getFileType() != ArcanistDiffChangeType::FILE_BINARY) {
         continue;
       }
 
-      $path = $change->getCurrentPath();
       $name = basename($path);
 
       $old_file = $repository_api->getOriginalFileData($path);
@@ -898,11 +930,9 @@ EOTEXT
       return $result;
     }
 
-    $future = new ExecFuture('file -b --mime -');
-    $future->write($data);
-    list($mime_type) = $future->resolvex();
-
-    $mime_type = trim($mime_type);
+    $tmp = new TempFile();
+    Filesystem::writeFile($tmp, $data);
+    $mime_type = Filesystem::getMimeType($tmp);
     $result['mime'] = $mime_type;
 
     echo "Uploading {$desc} '{$name}' ({$mime_type}, {$size} bytes)...\n";
@@ -966,6 +996,8 @@ EOTEXT
         }
       } catch (ArcanistDifferentialCommitMessageParserException $ex) {
         // Ignore.
+      } catch (ArcanistUsageException $ex) {
+        // Ignore an invalid Differential Revision field in the parent commit
       }
     }
 
@@ -1205,9 +1237,14 @@ EOTEXT
     $is_update = $this->getArgument('update');
     $is_raw = $this->isRawDiffSource();
     $is_message = $this->getArgument('use-commit-message');
+    $is_verbatim = $this->getArgument('verbatim');
 
     if ($is_message) {
       return $this->getCommitMessageFromCommit($is_message);
+    }
+
+    if ($is_verbatim) {
+      return $this->getCommitMessageFromUser();
     }
 
     if (!$is_raw && !$is_create && !$is_update) {
@@ -1241,7 +1278,12 @@ EOTEXT
         return $this->getCommitMessageFromUser();
       }
     } else if ($is_update) {
-      return $this->getCommitMessageFromRevision($is_update);
+      $revision_id = $this->normalizeRevisionID($is_update);
+      if (!is_numeric($revision_id)) {
+        throw new ArcanistUsageException(
+          'Parameter to --update must be a Differential Revision number');
+      }
+      return $this->getCommitMessageFromRevision($revision_id);
     } else {
       // This is --raw without enough info to create a revision, so force just
       // a diff.
@@ -1271,41 +1313,47 @@ EOTEXT
 
     $template = null;
 
-    $saved = $this->readScratchFile('create-message');
-    if ($saved) {
-      $where = $this->getReadableScratchFilePath('create-message');
+    if (!$this->getArgument('verbatim')) {
+      $saved = $this->readScratchFile('create-message');
+      if ($saved) {
+        $where = $this->getReadableScratchFilePath('create-message');
 
-      $preview = explode("\n", $saved);
-      $preview = array_shift($preview);
-      $preview = trim($preview);
-      $preview = phutil_utf8_shorten($preview, 64);
+        $preview = explode("\n", $saved);
+        $preview = array_shift($preview);
+        $preview = trim($preview);
+        $preview = phutil_utf8_shorten($preview, 64);
 
-      if ($preview) {
-        $preview = "Message begins:\n\n       {$preview}\n\n";
-      } else {
-        $preview = null;
-      }
+        if ($preview) {
+          $preview = "Message begins:\n\n       {$preview}\n\n";
+        } else {
+          $preview = null;
+        }
 
-      echo
-        "You have a saved revision message in '{$where}'.\n".
-        "{$preview}".
-        "You can use this message, or discard it.";
+        echo
+          "You have a saved revision message in '{$where}'.\n".
+          "{$preview}".
+          "You can use this message, or discard it.";
 
-      $use = phutil_console_confirm(
-        "Do you want to use this message?",
-        $default_no = false);
-      if ($use) {
-        $template = $saved;
-      } else {
-        $this->removeScratchFile('create-message');
+        $use = phutil_console_confirm(
+          "Do you want to use this message?",
+          $default_no = false);
+        if ($use) {
+          $template = $saved;
+        } else {
+          $this->removeScratchFile('create-message');
+        }
       }
     }
 
     $template_is_default = false;
     $notes = array();
+    $included = array();
 
-    if (!$template) {
-      list($fields, $notes) = $this->getDefaultCreateFields();
+    list($fields, $notes, $included) = $this->getDefaultCreateFields();
+    if ($template) {
+      $fields = array();
+      $notes = array();
+    } else {
       if (!$fields) {
         $template_is_default = true;
       }
@@ -1319,15 +1367,38 @@ EOTEXT
         ));
     }
 
-    $issues = array(
-      'NEW DIFFERENTIAL REVISION',
-      'Describe the changes in this new revision.',
-      '',
-      'arc could not identify any existing revision in your working copy.',
-      'If you intended to update an existing revision, use:',
-      '',
-      '  $ arc diff --update <revision>',
-    );
+    if ($included) {
+      foreach ($included as $k => $commit) {
+        $included[$k] = '        '.$commit;
+      }
+      $included = array_merge(
+        array(
+          "",
+          "Included commits:",
+          "",
+        ),
+        $included,
+        array(
+          "",
+        ));
+    } else {
+      $included = array(
+        '',
+      );
+    }
+
+    $issues = array_merge(
+      array(
+        'NEW DIFFERENTIAL REVISION',
+        'Describe the changes in this new revision.',
+      ),
+      $included,
+      array(
+        'arc could not identify any existing revision in your working copy.',
+        'If you intended to update an existing revision, use:',
+        '',
+        '  $ arc diff --update <revision>',
+      ));
     if ($notes) {
       $issues = array_merge($issues, array(''), $notes);
     }
@@ -1418,7 +1489,7 @@ EOTEXT
    * @task message
    */
   private function getCommitMessageFromRevision($revision_id) {
-    $id = $this->normalizeRevisionID($revision_id);
+    $id = $revision_id;
 
     $revision = $this->getConduit()->callMethodSynchronous(
       'differential.query',
@@ -1503,6 +1574,7 @@ EOTEXT
       rtrim($comments).
       "\n\n".
       "# Enter a brief description of the changes included in this update.\n".
+      "# The first line is used as subject, next lines as comment.\n".
       "#\n".
       "# If you intended to create a new revision, use:\n".
       "#  $ arc diff --create\n".
@@ -1541,7 +1613,7 @@ EOTEXT
   }
 
   private function getDefaultCreateFields() {
-    $empty = array(array(), array());
+    $empty = array(array(), array(), array());
 
     if ($this->isRawDiffSource()) {
       return $empty;
@@ -1560,6 +1632,7 @@ EOTEXT
   private function getGitCreateFields() {
     $conduit = $this->getConduit();
     $changes = $this->getLocalGitCommitMessages();
+    $included = array();
 
     $commits = array();
     foreach ($changes as $key => $change) {
@@ -1570,6 +1643,9 @@ EOTEXT
     foreach ($commits as $hash => $text) {
       $messages[$hash] = ArcanistDifferentialCommitMessage::newFromRawCorpus(
         $text);
+
+      $first_line = head(explode("\n", trim($text)));
+      $included[] = substr($hash, 0, 12).' '.$first_line;
     }
 
     $fields = array();
@@ -1579,6 +1655,10 @@ EOTEXT
         $message->pullDataFromConduit($conduit, $partial = true);
         $fields += $message->getFields();
       } catch (ArcanistDifferentialCommitMessageParserException $ex) {
+        if ($this->getArgument('verbatim')) {
+          throw $ex;
+        }
+
         $fields += $message->getFields();
 
         $frev = substr($hash, 0, 8);
@@ -1589,7 +1669,7 @@ EOTEXT
       }
     }
 
-    return array($fields, $notes);
+    return array($fields, $notes, $included);
   }
 
   private function getDefaultUpdateMessage() {
@@ -1676,7 +1756,7 @@ EOTEXT
     $messages = $repository_api->getCommitMessageLog();
 
     $local = $this->loadActiveLocalCommitInfo();
-    $hashes = ipull($local, null, 'rev');
+    $hashes = ipull($local, null, 'commit');
 
     $usable = array();
     foreach ($messages as $rev => $message) {

@@ -537,6 +537,10 @@ EODIFF;
     // this directory and belong to the same project.
 
     $project = $this->getWorkingCopyIdentity()->getProjectID();
+    if (!$project) {
+      return array();
+    }
+
     $results = $conduit->callMethodSynchronous(
       'differential.query',
       $query + array(
@@ -547,6 +551,11 @@ EODIFF;
       if ($result['sourcePath'] != $this->getPath()) {
         unset($results[$key]);
       }
+    }
+
+    foreach ($results as $key => $result) {
+      $results[$key]['why'] =
+        "Matching arcanist project name and working copy directory path.";
     }
 
     return $results;

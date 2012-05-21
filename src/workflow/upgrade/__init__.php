@@ -6,17 +6,15 @@
 
 
 
-phutil_require_module('arcanist', 'differential/constants/revisionstatus');
 phutil_require_module('arcanist', 'exception/usage');
-phutil_require_module('arcanist', 'exception/usage/userabort');
+phutil_require_module('arcanist', 'repository/api/base');
 phutil_require_module('arcanist', 'workflow/base');
+phutil_require_module('arcanist', 'workingcopyidentity');
 
 phutil_require_module('phutil', 'console');
 phutil_require_module('phutil', 'filesystem');
-phutil_require_module('phutil', 'filesystem/tempfile');
 phutil_require_module('phutil', 'future/exec');
-phutil_require_module('phutil', 'utils');
-phutil_require_module('phutil', 'xsprintf/csprintf');
+phutil_require_module('phutil', 'moduleutils');
 
 
-phutil_require_source('ArcanistLandWorkflow.php');
+phutil_require_source('ArcanistUpgradeWorkflow.php');

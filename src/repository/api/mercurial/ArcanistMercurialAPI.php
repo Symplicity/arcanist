@@ -26,6 +26,7 @@ final class ArcanistMercurialAPI extends ArcanistRepositoryAPI {
   private $status;
   private $base;
   private $relativeCommit;
+  private $relativeExplanation;
   private $workingCopyRevision;
   private $localCommitInfo;
   private $includeDirectoryStateInDiffs;
@@ -42,7 +43,11 @@ final class ArcanistMercurialAPI extends ArcanistRepositoryAPI {
     // There is an HGPLAIN environmental variable which enables "plain mode"
     // and hopefully disables this stuff.
 
-    $argv[0] = 'HGPLAIN=1 hg '.$argv[0];
+    if (phutil_is_windows()) {
+      $argv[0] = 'set HGPLAIN=1 & hg '.$argv[0];
+    } else {
+      $argv[0] = 'HGPLAIN=1 hg '.$argv[0];
+    }
 
     $future = newv('ExecFuture', $argv);
     $future->setCWD($this->getPath());
@@ -103,8 +108,13 @@ final class ArcanistMercurialAPI extends ArcanistRepositoryAPI {
       }
 
       if (!$logs) {
+
+        $this->relativeExplanation =
+          "you have no outgoing commits, so arc assumes you intend to submit ".
+          "uncommitted changes in the working copy.";
         // In Mercurial, we support operations against uncommitted changes.
-        return $this->getWorkingCopyRevision();
+        $this->setRelativeCommit($this->getWorkingCopyRevision());
+        return $this->relativeCommit;
       }
 
       $outgoing_revs = ipull($logs, 'rev');
@@ -143,6 +153,15 @@ final class ArcanistMercurialAPI extends ArcanistRepositoryAPI {
         }
       }
 
+      if ($against == 'null') {
+        $this->relativeExplanation =
+          "this is a new repository (all changes are outgoing).";
+      } else {
+        $this->relativeExplanation =
+          "it is the first commit reachable from the working copy state ".
+          "which is not outgoing.";
+      }
+
       $this->setRelativeCommit($against);
     }
     return $this->relativeCommit;
@@ -151,35 +170,65 @@ final class ArcanistMercurialAPI extends ArcanistRepositoryAPI {
   public function getLocalCommitInformation() {
     if ($this->localCommitInfo === null) {
       list($info) = $this->execxLocal(
-        'log --style default --rev %s..%s --',
+        "log --template '%C' --prune %s --rev %s --branch %s --",
+        "{node}\1{rev}\1{author}\1{date|rfc822date}\1".
+          "{branch}\1{tag}\1{parents}\1{desc}\2",
         $this->getRelativeCommit(),
-        $this->getWorkingCopyRevision());
-      $logs = ArcanistMercurialParser::parseMercurialLog($info);
+        $this->getWorkingCopyRevision().':0',
+        $this->getBranchName());
+      $logs = array_filter(explode("\2", $info));
 
-      // Get rid of the first log, it's not actually part of the diff. "hg log"
-      // is inclusive, while "hg diff" is exclusive.
-      array_shift($logs);
+      $last_node = null;
 
-      // Expand short hashes (12 characters) to full hashes (40 characters) by
-      // issuing a big "hg log" command. Possibly we should do this with parents
-      // too, but nothing uses them directly at the moment.
-      if ($logs) {
-        $cmd = array();
-        foreach (ipull($logs, 'rev') as $rev) {
-          $cmd[] = csprintf('--rev %s', $rev);
+      $futures = array();
+
+      $commits = array();
+      foreach ($logs as $log) {
+        list($node, $rev, $author, $date, $branch, $tag, $parents, $desc) =
+          explode("\1", $log);
+
+        // NOTE: If a commit has only one parent, {parents} returns empty.
+        // If it has two parents, {parents} returns revs and short hashes, not
+        // full hashes. Try to avoid making calls to "hg parents" because it's
+        // relatively expensive.
+        $commit_parents = null;
+        if (!$parents) {
+          if ($last_node) {
+            $commit_parents = array($last_node);
+          }
         }
 
-        list($full) = $this->execxLocal(
-          'log --template %s %C --',
-          '{node}\\n',
-          implode(' ', $cmd));
-
-        $full = explode("\n", trim($full));
-        foreach ($logs as $key => $dict) {
-          $logs[$key]['rev'] = array_pop($full);
+        if (!$commit_parents) {
+          // We didn't get a cheap hit on previous commit, so do the full-cost
+          // "hg parents" call. We can run these in parallel, at least.
+          $futures[$node] = $this->execFutureLocal(
+            "parents --template='{node}\\n' --rev %s",
+            $node);
         }
+
+        $commits[$node] = array(
+          'author'  => $author,
+          'time'    => strtotime($date),
+          'branch'  => $branch,
+          'tag'     => $tag,
+          'commit'  => $node,
+          'rev'     => $node, // TODO: Remove eventually.
+          'local'   => $rev,
+          'parents' => $commit_parents,
+          'summary' => head(explode("\n", $desc)),
+          'message' => $desc,
+        );
+
+        $last_node = $node;
       }
-      $this->localCommitInfo = $logs;
+
+      foreach (Futures($futures)->limit(4) as $node => $future) {
+        list($parents) = $future->resolvex();
+        $parents = array_filter(explode("\n", $parents));
+        $commits[$node]['parents'] = $parents;
+      }
+
+      $this->localCommitInfo = $commits;
     }
 
     return $this->localCommitInfo;
@@ -277,11 +326,6 @@ final class ArcanistMercurialAPI extends ArcanistRepositoryAPI {
   private function getDiffOptions() {
     $options = array(
       '--git',
-      // NOTE: We can't use "--color never" because that flag is provided
-      // by the color extension, which may or may not be enabled. Instead,
-      // set the color mode configuration so that color is disabled regardless
-      // of whether the extension is present or not.
-      '--config color.mode=off',
       '-U'.$this->getDiffLinesOfContext(),
     );
     return implode(' ', $options);
@@ -377,6 +421,9 @@ final class ArcanistMercurialAPI extends ArcanistRepositoryAPI {
     if (count($argv) != 1) {
       throw new ArcanistUsageException("Specify only one commit.");
     }
+
+    $this->relativeExplanation = "you explicitly specified it.";
+
     // This does the "hg id" call we need to normalize/validate the revision
     // identifier.
     $this->setRelativeCommit(reset($argv));
@@ -443,7 +490,7 @@ final class ArcanistMercurialAPI extends ArcanistRepositoryAPI {
     // Try to find revisions by hash.
     $hashes = array();
     foreach ($this->getLocalCommitInformation() as $commit) {
-      $hashes[] = array('hgcm', $commit['rev']);
+      $hashes[] = array('hgcm', $commit['commit']);
     }
 
     $results = $conduit->callMethodSynchronous(
@@ -451,6 +498,12 @@ final class ArcanistMercurialAPI extends ArcanistRepositoryAPI {
       $query + array(
         'commitHashes' => $hashes,
       ));
+
+    foreach ($results as $key => $hash) {
+      $results[$key]['why'] =
+        "A mercurial commit hash in the commit range is already attached ".
+        "to the Differential revision.";
+    }
 
     return $results;
   }
@@ -479,6 +532,24 @@ final class ArcanistMercurialAPI extends ArcanistRepositoryAPI {
   private function dropCaches() {
     $this->status = null;
     $this->localCommitInfo = null;
+  }
+
+  public function getRelativeExplanation() {
+    return $this->relativeExplanation;
+  }
+
+  public function getCommitSummary($commit) {
+    if ($commit == 'null') {
+      return '(The Empty Void)';
+    }
+
+    list($summary) = $this->execxLocal(
+      'log --template {desc} --limit 1 --rev %s',
+      $commit);
+
+    $summary = head(explode("\n", $summary));
+
+    return trim($summary);
   }
 
 }

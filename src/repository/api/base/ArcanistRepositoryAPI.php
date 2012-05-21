@@ -177,6 +177,11 @@ abstract class ArcanistRepositoryAPI {
     ConduitClient $conduit,
     array $query);
 
+  public function getAllBranches() {
+    // TODO: Implement for Mercurial/SVN and make abstract.
+    return array();
+  }
+
   public function hasLocalCommit($commit) {
     throw new ArcanistCapabilityNotSupportedException($this);
   }
@@ -186,6 +191,14 @@ abstract class ArcanistRepositoryAPI {
   }
 
   public function parseRelativeLocalCommit(array $argv) {
+    throw new ArcanistCapabilityNotSupportedException($this);
+  }
+
+  public function getRelativeExplanation() {
+    throw new ArcanistCapabilityNotSupportedException($this);
+  }
+
+  public function getCommitSummary($commit) {
     throw new ArcanistCapabilityNotSupportedException($this);
   }
 
