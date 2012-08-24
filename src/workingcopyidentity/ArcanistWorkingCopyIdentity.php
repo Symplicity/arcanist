@@ -19,10 +19,14 @@
 /**
  * Interfaces with basic information about the working copy.
  *
+ *
+ * @task config
+ *
  * @group workingcopy
  */
 final class ArcanistWorkingCopyIdentity {
 
+  protected $localConfig;
   protected $projectConfig;
   protected $projectRoot;
 
@@ -94,6 +98,48 @@ final class ArcanistWorkingCopyIdentity {
   protected function __construct($root, array $config) {
     $this->projectRoot    = $root;
     $this->projectConfig  = $config;
+    $this->localConfig    = array();
+
+    $vc_dirs = array(
+      '.git',
+      '.hg',
+      '.svn',
+    );
+    $found_meta_dir = false;
+    foreach ($vc_dirs as $dir) {
+      $meta_path = Filesystem::resolvePath(
+        $dir,
+        $this->projectRoot);
+      if (Filesystem::pathExists($meta_path)) {
+        $found_meta_dir = true;
+        $local_path = Filesystem::resolvePath(
+          'arc/config',
+          $meta_path);
+        if (Filesystem::pathExists($local_path)) {
+          $file = Filesystem::readFile($local_path);
+          if ($file) {
+            $this->localConfig = json_decode($file, true);
+          }
+        }
+        break;
+      }
+    }
+
+    if (!$found_meta_dir) {
+      // Try for a single higher-level .svn directory as used by svn 1.7+
+      foreach (Filesystem::walkToRoot($this->projectRoot) as $parent_path) {
+        $local_path = Filesystem::resolvePath(
+          '.svn/arc/config',
+          $parent_path);
+        if (Filesystem::pathExists($local_path)) {
+          $file = Filesystem::readFile($local_path);
+          if ($file) {
+            $this->localConfig = json_decode($file, true);
+          }
+        }
+      }
+    }
+
   }
 
   public function getProjectID() {
@@ -108,11 +154,106 @@ final class ArcanistWorkingCopyIdentity {
     return $this->getConfig('conduit_uri');
   }
 
-  public function getConfig($key) {
-    if (!empty($this->projectConfig[$key])) {
-      return $this->projectConfig[$key];
+
+/* -(  Config  )------------------------------------------------------------- */
+
+  public function getProjectConfig() {
+    return $this->projectConfig;
+  }
+
+  /**
+   * Read a configuration directive from project configuration. This reads ONLY
+   * permanent project configuration (i.e., ".arcconfig"), not other
+   * configuration sources. See @{method:getConfigFromAnySource} to read from
+   * user configuration.
+   *
+   * @param key   Key to read.
+   * @param wild  Default value if key is not found.
+   * @return wild Value, or default value if not found.
+   *
+   * @task config
+   */
+  public function getConfig($key, $default = null) {
+    $settings = new ArcanistSettings();
+
+    $pval = idx($this->projectConfig, $key);
+
+    // Test for older names in the per-project config only, since
+    // they've only been used there.
+    if ($pval === null) {
+      $legacy = $settings->getLegacyName($key);
+      if ($legacy) {
+        $pval = $this->getConfig($legacy);
+      }
     }
-    return null;
+
+    if ($pval === null) {
+      $pval = $default;
+    } else {
+      $pval = $settings->willReadValue($key, $pval);
+    }
+
+    return $pval;
+  }
+
+
+  /**
+   * Read a configuration directive from local configuration.  This
+   * reads ONLY the per-working copy configuration,
+   * i.e. .(git|hg|svn)/arc/config, and not other configuration
+   * sources.  See @{method:getConfigFromAnySource} to read from any
+   * config source or @{method:getConfig} to read permanent
+   * project-level config.
+   *
+   * @task config
+   */
+  public function getLocalConfig($key, $default=null) {
+    return idx($this->localConfig, $key, $default);
+  }
+
+  /**
+   * Read a configuration directive from any available configuration source.
+   * In contrast to @{method:getConfig}, this will look for the directive in
+   * local and user configuration in addition to project configuration.
+   * The precedence is local > project > user
+   *
+   * @param key   Key to read.
+   * @param wild  Default value if key is not found.
+   * @return wild Value, or default value if not found.
+   *
+   * @task config
+   */
+  public function getConfigFromAnySource($key, $default = null) {
+    $settings = new ArcanistSettings();
+
+    // try local config first
+    $pval = $this->getLocalConfig($key);
+
+    // then per-project config
+    if ($pval === null) {
+      $pval = $this->getConfig($key);
+    }
+
+    // now try global (i.e. user-level) config
+    if ($pval === null) {
+      $global_config = ArcanistBaseWorkflow::readGlobalArcConfig();
+      $pval = idx($global_config, $key);
+    }
+
+    // Finally, try system-level config.
+    if ($pval === null) {
+      $system_config = ArcanistBaseWorkflow::readSystemArcConfig();
+      $pval = idx($system_config, $key);
+    }
+
+    if ($pval === null) {
+      $pval = $default;
+    } else {
+      $pval = $settings->willReadValue($key, $pval);
+    }
+
+    return $pval;
+
   }
 
 }

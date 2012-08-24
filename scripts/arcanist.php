@@ -21,136 +21,116 @@ sanity_check_environment();
 
 require_once dirname(__FILE__).'/__init_script__.php';
 
-phutil_require_module('phutil', 'conduit/client');
-phutil_require_module('phutil', 'console');
-phutil_require_module('phutil', 'future/exec');
-phutil_require_module('phutil', 'filesystem');
-phutil_require_module('phutil', 'symbols');
-
-phutil_require_module('arcanist', 'exception/usage');
-phutil_require_module('arcanist', 'configuration');
-phutil_require_module('arcanist', 'workingcopyidentity');
-phutil_require_module('arcanist', 'repository/api/base');
-
 ini_set('memory_limit', -1);
 
 $original_argv = $argv;
 $args = new PhutilArgumentParser($argv);
 $args->parseStandardArguments();
+$args->parsePartial(
+  array(
+    array(
+      'name'    => 'load-phutil-library',
+      'param'   => 'path',
+      'help'    => 'Load a libphutil library.',
+      'repeat'  => true,
+    ),
+    array(
+      'name'    => 'conduit-uri',
+      'param'   => 'uri',
+      'help'    => 'Connect to Phabricator install specified by __uri__.',
+    ),
+    array(
+      'name'    => 'conduit-version',
+      'param'   => 'version',
+      'help'    => '(Developers) Mock client version in protocol handshake.',
+    ),
+    array(
+      'name'    => 'conduit-timeout',
+      'param'   => 'timeout',
+      'help'    => 'Set Conduit timeout (in seconds).',
+    ),
+  ));
 
-$argv = $args->getUnconsumedArgumentVector();
 $config_trace_mode = $args->getArg('trace');
 
-$force_conduit = null;
-$args = $argv;
-$load = array();
-$matches = null;
-foreach ($args as $key => $arg) {
-  if ($arg == '--') {
-    break;
-  } else if (preg_match('/^--load-phutil-library=(.*)$/', $arg, $matches)) {
-    unset($args[$key]);
-    $load[] = $matches[1];
-  } else if (preg_match('/^--conduit-uri=(.*)$/', $arg, $matches)) {
-    unset($args[$key]);
-    $force_conduit = $matches[1];
-  }
-}
+$force_conduit = $args->getArg('conduit-uri');
+$force_conduit_version = $args->getArg('conduit-version');
+$conduit_timeout = $args->getArg('conduit-timeout');
+$load = $args->getArg('load-phutil-library');
 
-$args = array_values($args);
+$argv = $args->getUnconsumedArgumentVector();
+$args = array_values($argv);
+
 $working_directory = getcwd();
+$console = PhutilConsole::getConsole();
 
 try {
+
+  if ($config_trace_mode) {
+    $phutil_location = phutil_get_library_root('phutil');
+    $arcanist_location = phutil_get_library_root('arcanist');
+    $console->writeErr("libphutil loaded from '{$phutil_location}'.\n");
+    $console->writeErr("arcanist loaded from '{$arcanist_location}'.\n");
+  }
 
   if (!$args) {
     throw new ArcanistUsageException("No command provided. Try 'arc help'.");
   }
 
+  $global_config = ArcanistBaseWorkflow::readGlobalArcConfig();
+  $system_config = ArcanistBaseWorkflow::readSystemArcConfig();
   $working_copy = ArcanistWorkingCopyIdentity::newFromPath($working_directory);
+
+  // Load additional libraries, which can provide new classes like configuration
+  // overrides, linters and lint engines, unit test engines, etc.
+
+  // If the user specified "--load-phutil-library" one or more times from
+  // the command line, we load those libraries **instead** of whatever else
+  // is configured. This is basically a debugging feature to let you force
+  // specific libraries to load regardless of the state of the world.
   if ($load) {
-    $libs = $load;
+    // Load the flag libraries. These must load, since the user specified them
+    // explicitly.
+    arcanist_load_libraries(
+      $load,
+      $must_load = true,
+      $lib_source = 'a "--load-phutil-library" flag',
+      $working_copy,
+      $config_trace_mode);
   } else {
-    $libs = $working_copy->getConfig('phutil_libraries');
-  }
-  if ($libs) {
-    foreach ($libs as $name => $location) {
+    // Load libraries in system 'load' config. In contrast to global config, we
+    // fail hard here because this file is edited manually, so if 'arc' breaks
+    // that doesn't make it any more difficult to correct.
+    arcanist_load_libraries(
+      idx($system_config, 'load', array()),
+      $must_load = true,
+      $lib_source = 'the "load" setting in system config',
+      $working_copy,
+      $config_trace_mode);
 
-      // Try to resolve the library location. We look in several places, in
-      // order:
-      //
-      //  1. Inside the working copy. This is for phutil libraries within the
-      //     project. For instance "library/src" will resolve to
-      //     "./library/src" if it exists.
-      //  2. In the same directory as the working copy. This allows you to
-      //     check out a library alongside a working copy and reference it.
-      //     If we haven't resolved yet, "library/src" will try to resolve to
-      //     "../library/src" if it exists.
-      //  3. Using normal libphutil resolution rules. Generally, this means
-      //     that it checks for libraries next to libphutil, then libraries
-      //     in the PHP include_path.
+    // Load libraries in global 'load' config, as per "arc set-config load". We
+    // need to fail softly if these break because errors would prevent the user
+    // from running "arc set-config" to correct them.
+    arcanist_load_libraries(
+      idx($global_config, 'load', array()),
+      $must_load = false,
+      $lib_source = 'the "load" setting in global config',
+      $working_copy,
+      $config_trace_mode);
 
-      $resolved = false;
-
-      // Check inside the working copy.
-      $resolved_location = Filesystem::resolvePath(
-        $location,
-        $working_copy->getProjectRoot());
-      if (Filesystem::pathExists($resolved_location)) {
-        $location = $resolved_location;
-        $resolved = true;
-      }
-
-      // If we didn't find anything, check alongside the working copy.
-      if (!$resolved) {
-        $resolved_location = Filesystem::resolvePath(
-          $location,
-          dirname($working_copy->getProjectRoot()));
-        if (Filesystem::pathExists($resolved_location)) {
-          $location = $resolved_location;
-          $resolved = true;
-        }
-      }
-
-      if ($config_trace_mode) {
-        echo "Loading phutil library '{$name}' from '{$location}'...\n";
-      }
-
-      try {
-        phutil_load_library($location);
-      } catch (PhutilBootloaderException $ex) {
-        $error_msg = sprintf(
-          'Failed to load library "%s" at location "%s". Please check the '.
-          '"phutil_libraries" setting in your .arcconfig file. Refer to '.
-          '<http://www.phabricator.com/docs/phabricator/article/'.
-          'Arcanist_User_Guide_Configuring_a_New_Project.html> '.
-          'for more information.',
-          $name,
-          $location);
-        throw new ArcanistUsageException($error_msg);
-      } catch (PhutilLibraryConflictException $ex) {
-        if ($ex->getLibrary() != 'arcanist') {
-          throw $ex;
-        }
-
-        $arc_dir = dirname(dirname(__FILE__));
-        $error_msg =
-          "You are trying to run one copy of Arcanist on another copy of ".
-          "Arcanist. This operation is not supported. To execute Arcanist ".
-          "operations against this working copy, run './bin/arc' (from the ".
-          "current working copy) not some other copy of 'arc' (you ran one ".
-          "from '{$arc_dir}').";
-
-        throw new ArcanistUsageException($error_msg);
-      }
-    }
+    // Load libraries in ".arcconfig". Libraries here must load.
+    arcanist_load_libraries(
+      $working_copy->getConfig('load'),
+      $must_load = true,
+      $lib_source = 'the "load" setting in ".arcconfig"',
+      $working_copy,
+      $config_trace_mode);
   }
 
   $user_config = ArcanistBaseWorkflow::readUserConfigurationFile();
-  $global_config = ArcanistBaseWorkflow::readGlobalArcConfig();
 
   $config = $working_copy->getConfig('arcanist_configuration');
   if ($config) {
-    PhutilSymbolLoader::loadClass($config);
     $config = new $config();
   } else {
     $config = new ArcanistConfiguration();
@@ -166,45 +146,79 @@ try {
     // normally to prevent you from doing silly things like aliasing 'alias'
     // to something else.
 
+    $aliases = ArcanistAliasWorkflow::getAliases($working_copy);
     list($new_command, $args) = ArcanistAliasWorkflow::resolveAliases(
       $command,
       $config,
       $args,
       $working_copy);
 
+    $full_alias = idx($aliases, $command, array());
+    $full_alias = implode(' ', $full_alias);
+
+    // Run shell command aliases.
+
+    if (ArcanistAliasWorkflow::isShellCommandAlias($new_command)) {
+      $shell_cmd = substr($full_alias, 1);
+
+      if ($config_trace_mode) {
+        echo "[alias: 'arc {$command}' -> \$ {$full_alias}]\n";
+      }
+
+      if ($args) {
+        $err = phutil_passthru('%C %Ls', $shell_cmd, $args);
+      } else {
+        $err = phutil_passthru('%C', $shell_cmd);
+      }
+      exit($err);
+    }
+
+    // Run arc command aliases.
+
     if ($new_command) {
       $workflow = $config->buildWorkflow($new_command);
+      if ($workflow) {
+        if ($config_trace_mode) {
+          echo "[alias: 'arc {$command}' -> 'arc {$full_alias}']\n";
+        }
+        $command = $new_command;
+      }
     }
 
     if (!$workflow) {
       throw new ArcanistUsageException(
         "Unknown command '{$command}'. Try 'arc help'.");
-    } else {
-      if ($config_trace_mode) {
-        $aliases = ArcanistAliasWorkflow::getAliases($working_copy);
-        $target = implode(' ', idx($aliases, $command, array()));
-        echo "[alias: 'arc {$command}' -> 'arc {$target}']\n";
-      }
-      $command = $new_command;
     }
   }
+
   $workflow->setArcanistConfiguration($config);
   $workflow->setCommand($command);
   $workflow->setWorkingDirectory($working_directory);
   $workflow->parseArguments($args);
+
+  if ($force_conduit_version) {
+    $workflow->forceConduitVersion($force_conduit_version);
+  }
+  if ($conduit_timeout) {
+    $workflow->setConduitTimeout($conduit_timeout);
+  }
 
   $need_working_copy    = $workflow->requiresWorkingCopy();
   $need_conduit         = $workflow->requiresConduit();
   $need_auth            = $workflow->requiresAuthentication();
   $need_repository_api  = $workflow->requiresRepositoryAPI();
 
+  $want_repository_api = $workflow->desiresRepositoryAPI();
+  $want_working_copy = $workflow->desiresWorkingCopy() ||
+                       $want_repository_api;
+
   $need_conduit       = $need_conduit ||
                         $need_auth;
   $need_working_copy  = $need_working_copy ||
                         $need_repository_api;
 
-  if ($need_working_copy) {
-    if (!$working_copy->getProjectRoot()) {
+  if ($need_working_copy || $want_working_copy) {
+    if ($need_working_copy && !$working_copy->getProjectRoot()) {
       throw new ArcanistUsageException(
         "This command must be run in a Git, Mercurial or Subversion working ".
         "copy.");
@@ -276,7 +290,7 @@ try {
     $workflow->authenticateConduit();
   }
 
-  if ($need_repository_api) {
+  if ($need_repository_api || ($want_repository_api && $working_copy)) {
     $repository_api = ArcanistRepositoryAPI::newAPIFromWorkingCopyIdentity(
       $working_copy);
     $workflow->setRepositoryAPI($repository_api);
@@ -293,7 +307,7 @@ try {
   $workflow->willRunWorkflow();
   $err = $workflow->run();
   $config->didRunWorkflow($command, $workflow, $err);
-  exit($err);
+  exit((int)$err);
 
 } catch (ArcanistUsageException $ex) {
   echo phutil_console_format(
@@ -311,7 +325,7 @@ try {
   }
 
   echo phutil_console_format(
-    "\n**Exception:**\n%s\n%s\n",
+    "**Exception**\n%s\n%s\n",
     $ex->getMessage(),
     "(Run with --trace for a full exception trace.)");
 
@@ -418,4 +432,100 @@ function die_with_bad_php($message) {
   echo $message;
   echo "\n\n";
   exit(1);
+}
+
+
+function arcanist_load_libraries(
+  $load,
+  $must_load,
+  $lib_source,
+  ArcanistWorkingCopyIdentity $working_copy,
+  $config_trace_mode) {
+
+  if (!$load) {
+    return;
+  }
+
+  if (!is_array($load)) {
+    $error = "Libraries specified by {$lib_source} are invalid; expected ".
+             "a list. Check your configuration.";
+    $console = PhutilConsole::getConsole();
+    $console->writeErr("WARNING: %s\n", $error);
+    return;
+  }
+
+  foreach ($load as $location) {
+
+    // Try to resolve the library location. We look in several places, in
+    // order:
+    //
+    //  1. Inside the working copy. This is for phutil libraries within the
+    //     project. For instance "library/src" will resolve to
+    //     "./library/src" if it exists.
+    //  2. In the same directory as the working copy. This allows you to
+    //     check out a library alongside a working copy and reference it.
+    //     If we haven't resolved yet, "library/src" will try to resolve to
+    //     "../library/src" if it exists.
+    //  3. Using normal libphutil resolution rules. Generally, this means
+    //     that it checks for libraries next to libphutil, then libraries
+    //     in the PHP include_path.
+    //
+    // Note that absolute paths will just resolve absolutely through rule (1).
+
+    $resolved = false;
+
+    // Check inside the working copy. This also checks absolute paths, since
+    // they'll resolve absolute and just ignore the project root.
+    $resolved_location = Filesystem::resolvePath(
+      $location,
+      $working_copy->getProjectRoot());
+    if (Filesystem::pathExists($resolved_location)) {
+      $location = $resolved_location;
+      $resolved = true;
+    }
+
+    // If we didn't find anything, check alongside the working copy.
+    if (!$resolved) {
+      $resolved_location = Filesystem::resolvePath(
+        $location,
+        dirname($working_copy->getProjectRoot()));
+      if (Filesystem::pathExists($resolved_location)) {
+        $location = $resolved_location;
+        $resolved = true;
+      }
+    }
+
+    if ($config_trace_mode) {
+      echo "Loading phutil library from '{$location}'...\n";
+    }
+
+    $error = null;
+    try {
+      phutil_load_library($location);
+    } catch (PhutilBootloaderException $ex) {
+      $error = "Failed to load phutil library at location '{$location}'. ".
+               "This library is specified by {$lib_source}. Check that the ".
+               "setting is correct and the library is located in the right ".
+               "place.";
+      if ($must_load) {
+        throw new ArcanistUsageException($error);
+      } else {
+        file_put_contents(
+          'php://stderr',
+          phutil_console_wrap('WARNING: '.$error."\n\n"));
+      }
+    } catch (PhutilLibraryConflictException $ex) {
+      if ($ex->getLibrary() != 'arcanist') {
+        throw $ex;
+      }
+      $arc_dir = dirname(dirname(__FILE__));
+      $error =
+        "You are trying to run one copy of Arcanist on another copy of ".
+        "Arcanist. This operation is not supported. To execute Arcanist ".
+        "operations against this working copy, run './bin/arc' (from the ".
+        "current working copy) not some other copy of 'arc' (you ran one ".
+        "from '{$arc_dir}').";
+      throw new ArcanistUsageException($error);
+    }
+  }
 }
