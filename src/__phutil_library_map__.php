@@ -136,8 +136,8 @@ phutil_register_library_map(array(
     'PhutilLintEngine' => 'lint/engine/PhutilLintEngine.php',
     'PhutilUnitTestEngine' => 'unit/engine/PhutilUnitTestEngine.php',
     'PhutilUnitTestEngineTestCase' => 'unit/engine/__tests__/PhutilUnitTestEngineTestCase.php',
-    'SympArcanistLintEngine' => 'lint/engine/symp',
-    'SympXHPASTLinter' => 'lint/linter/symp',
+    'SympArcanistLintEngine' => 'lint/engine/symp/SympArcanistLintEngine.php',
+    'SympXHPASTLinter' => 'lint/linter/symp/SympXHPASTLinter.php',
     'UnitTestableArcanistLintEngine' => 'lint/engine/UnitTestableArcanistLintEngine.php',
   ),
   'function' =>
