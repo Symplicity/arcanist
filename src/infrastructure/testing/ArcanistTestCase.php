@@ -16,13 +16,14 @@
  * limitations under the License.
  */
 
-final class ArcanistEventType extends PhutilEventType {
+abstract class ArcanistTestCase extends ArcanistPhutilTestCase {
 
-  const TYPE_COMMIT_WILLCOMMITSVN   = 'commit.willCommitSVN';
+  protected function getLink($method) {
+    $arcanist_project = 'PHID-APRJ-703e0b140530f17ede30';
+    return
+      'https://secure.phabricator.com/diffusion/symbol/'.$method.
+      '/?lang=php&projects='.$arcanist_project.
+      '&jump=true&context='.get_class($this);
+  }
 
-  const TYPE_DIFF_WILLBUILDMESSAGE  = 'diff.willBuildMessage';
-  const TYPE_DIFF_DIDBUILDMESSAGE   = 'diff.didBuildMessage';
-  const TYPE_DIFF_WASCREATED        = 'diff.wasCreated';
-
-  const TYPE_REVISION_WILLCREATEREVISION = 'revision.willCreateRevision';
 }

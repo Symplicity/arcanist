@@ -336,7 +336,7 @@ final class ArcanistGitAPI extends ArcanistRepositoryAPI {
     //    $ git rev-parse --abbrev-ref `git symbolic-ref HEAD`
     //
     // But that may fail if you're not on a branch.
-    list($stdout) = $this->execxLocal('branch');
+    list($stdout) = $this->execxLocal('branch --no-color');
 
     $matches = null;
     if (preg_match('/^\* (.+)$/m', $stdout, $matches)) {
@@ -384,8 +384,17 @@ final class ArcanistGitAPI extends ArcanistRepositoryAPI {
   }
 
   public function getCanonicalRevisionName($string) {
-    list($stdout) = $this->execxLocal('show -s --format=%C %s',
-      '%H', $string);
+    $match = null;
+    if (preg_match('/@([0-9]+)$/', $string, $match)) {
+      list($stdout) = $this->execxLocal(
+        'svn find-rev r%d',
+        $match[1]);
+    } else {
+      list($stdout) = $this->execxLocal(
+        'show -s --format=%C %s',
+        '%H',
+        $string);
+    }
     return rtrim($stdout);
   }
 
@@ -682,7 +691,9 @@ final class ArcanistGitAPI extends ArcanistRepositoryAPI {
 
   public function hasLocalCommit($commit) {
     try {
-      $this->getCanonicalRevisionName($commit);
+      if (!$this->getCanonicalRevisionName($commit)) {
+        return false;
+      }
     } catch (CommandException $exception) {
       return false;
     }
@@ -753,7 +764,7 @@ final class ArcanistGitAPI extends ArcanistRepositoryAPI {
   public function getCommitMessage($commit) {
     list($message) = $this->execxLocal(
       'log -n1 --format=%C %s --',
-      '%s%n%b',
+      '%s%n%n%b',
       $commit);
     return $message;
   }

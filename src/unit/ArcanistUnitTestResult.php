@@ -32,6 +32,7 @@ final class ArcanistUnitTestResult {
 
   private $namespace;
   private $name;
+  private $link;
   private $result;
   private $duration;
   private $userData;
@@ -47,6 +48,15 @@ final class ArcanistUnitTestResult {
     return $this->name;
   }
 
+  public function setLink($link) {
+    $this->link = $link;
+    return $this;
+  }
+
+  public function getLink() {
+    return $this->link;
+  }
+
   public function setResult($result) {
     $this->result = $result;
     return $this;
@@ -54,6 +64,18 @@ final class ArcanistUnitTestResult {
 
   public function getResult() {
     return $this->result;
+  }
+
+  public function getConsoleFormattedResult() {
+    static $status_codes = array(
+      self::RESULT_PASS => '<bg:green>** PASS **</bg>',
+      self::RESULT_FAIL => '<bg:red>** FAIL **</bg>',
+      self::RESULT_SKIP => '<bg:yellow>** SKIP **</bg>',
+      self::RESULT_BROKEN => '<bg:red>** BROKEN **</bg>',
+      self::RESULT_UNSOUND => '<bg:yellow>** UNSOUND **</bg>',
+      self::RESULT_POSTPONED => '<bg:yellow>** POSTPONED **</bg>',
+    );
+    return phutil_console_format($status_codes[$this->result]);
   }
 
   public function setDuration($duration) {

@@ -114,7 +114,7 @@ final class ArcanistXHPASTLinter extends ArcanistLinter {
       self::LINT_NAMING_CONVENTIONS
         => ArcanistLintSeverity::SEVERITY_WARNING,
       self::LINT_PREG_QUOTE_MISUSE
-        => ArcanistLintSeverity::SEVERITY_WARNING,
+        => ArcanistLintSeverity::SEVERITY_ADVICE,
       self::LINT_BRACE_FORMATTING
         => ArcanistLintSeverity::SEVERITY_WARNING,
       self::LINT_PARENTHESES_SPACING
@@ -128,7 +128,7 @@ final class ArcanistXHPASTLinter extends ArcanistLinter {
       self::LINT_IMPLICIT_FALLTHROUGH
         => ArcanistLintSeverity::SEVERITY_WARNING,
       self::LINT_PHT_WITH_DYNAMIC_STRING
-        => ArcanistLintSeverity::SEVERITY_WARNING,
+        => ArcanistLintSeverity::SEVERITY_DISABLED,
       self::LINT_SLOWNESS
         => ArcanistLintSeverity::SEVERITY_WARNING,
 
@@ -404,11 +404,24 @@ final class ArcanistXHPASTLinter extends ArcanistLinter {
       }
     }
 
+    $ternaries = $root->selectDescendantsOfType('n_TERNARY_EXPRESSION');
+    foreach ($ternaries as $ternary) {
+      $yes = $ternary->getChildByIndex(1);
+      if ($yes->getTypeName() == 'n_EMPTY') {
+        $this->raiseLintAtNode(
+          $ternary,
+          self::LINT_PHP_53_FEATURES,
+          'This codebase targets PHP 5.2, but short ternary was not '.
+          'introduced until PHP 5.3.');
+      }
+    }
+
     $this->lintPHP53Functions($root);
   }
 
   private function lintPHP53Functions($root) {
-    $target = dirname(__FILE__).'/../../../resources/php_compat_info.json';
+    $target = phutil_get_library_root('arcanist').
+      '/../resources/php_compat_info.json';
     $compat_info = json_decode(file_get_contents($target), true);
 
     $calls = $root->selectDescendantsOfType('n_FUNCTION_CALL');
@@ -416,6 +429,7 @@ final class ArcanistXHPASTLinter extends ArcanistLinter {
       $node = $call->getChildByIndex(0);
       $name = strtolower($node->getConcreteString());
       $version = idx($compat_info['functions'], $name);
+      $windows_version = idx($compat_info['functions_windows'], $name);
       if ($version) {
         $this->raiseLintAtNode(
           $node,
@@ -434,6 +448,13 @@ final class ArcanistXHPASTLinter extends ArcanistLinter {
               "of `{$name}()` was not introduced until PHP {$version}.");
           }
         }
+      } else if ($windows_version !== null) {
+        $this->raiseLintAtNode(
+          $node,
+          self::LINT_PHP_53_FEATURES,
+          "This codebase targets PHP 5.2.3, but `{$name}()` is not available ".
+          "on Windows".
+          ($windows_version ? " until PHP {$windows_version}" : "").".");
       }
     }
 
@@ -487,28 +508,61 @@ final class ArcanistXHPASTLinter extends ArcanistLinter {
 
 
       foreach ($blocks as $key => $block) {
-        $tokens = $block->getTokens();
+        // Collect all the tokens in this block which aren't at top level.
+        // We want to ignore "break", and "continue" in these blocks.
+        $lower_level = $block->selectDescendantsOfType('n_WHILE');
+        $lower_level->add($block->selectDescendantsOfType('n_DO_WHILE'));
+        $lower_level->add($block->selectDescendantsOfType('n_FOR'));
+        $lower_level->add($block->selectDescendantsOfType('n_FOREACH'));
+        $lower_level->add($block->selectDescendantsOfType('n_SWITCH'));
+        $lower_level_tokens = array();
+        foreach ($lower_level as $lower_level_block) {
+          $lower_level_tokens += $lower_level_block->getTokens();
+        }
+
+        // Collect all the tokens in this block which aren't in this scope
+        // (because they're inside class, function or interface declarations).
+        // We want to ignore all of these tokens.
+        $decls = $block->selectDescendantsOfType('n_FUNCTION_DECLARATION');
+        $decls->add($block->selectDescendantsOfType('n_CLASS_DECLARATION'));
+        // For completeness; these can't actually have anything.
+        $decls->add($block->selectDescendantsOfType('n_INTERFACE_DECLARATION'));
+        $different_scope_tokens = array();
+        foreach ($decls as $decl) {
+          $different_scope_tokens += $decl->getTokens();
+        }
+
+        $lower_level_tokens += $different_scope_tokens;
 
         // Get all the trailing nonsemantic tokens, since we need to look for
         // "fallthrough" comments past the end of the semantic block.
 
+        $tokens = $block->getTokens();
         $last = end($tokens);
         while ($last && $last = $last->getNextToken()) {
           if (!$last->isSemantic()) {
-            $tokens[] = $last;
+            $tokens[$last->getTokenID()] = $last;
           }
         }
 
-        $blocks[$key] = $tokens;
+        $blocks[$key] = array(
+          $tokens,
+          $lower_level_tokens,
+          $different_scope_tokens,
+        );
       }
 
-      foreach ($blocks as $tokens) {
+      foreach ($blocks as $token_lists) {
+        list(
+          $tokens,
+          $lower_level_tokens,
+          $different_scope_tokens) = $token_lists;
 
         // Test each block (case or default statement) to see if it's OK. It's
         // OK if:
         //
         //  - it is empty; or
-        //  - it ends in break, return, throw, continue or exit; or
+        //  - it ends in break, return, throw, continue or exit at top level; or
         //  - it has a comment with "fallthrough" in its text.
 
         // Empty blocks are OK, so we start this at `true` and only set it to
@@ -519,7 +573,7 @@ final class ArcanistXHPASTLinter extends ArcanistLinter {
         // the block (break, return, throw, continue) or something else.
         $statement_ok = false;
 
-        foreach ($tokens as $token) {
+        foreach ($tokens as $token_id => $token) {
           if (!$token->isSemantic()) {
             // Liberally match "fall" in the comment text so that comments like
             // "fallthru", "fall through", "fallthrough", etc., are accepted.
@@ -532,6 +586,14 @@ final class ArcanistXHPASTLinter extends ArcanistLinter {
 
           $tok_type = $token->getTypeName();
 
+          if ($tok_type == 'T_FUNCTION' ||
+              $tok_type == 'T_CLASS' ||
+              $tok_type == 'T_INTERFACE') {
+            // These aren't statements, but mark the block as nonempty anyway.
+            $block_ok = false;
+            continue;
+          }
+
           if ($tok_type == ';') {
             if ($statement_ok) {
               $statment_ok = false;
@@ -541,13 +603,23 @@ final class ArcanistXHPASTLinter extends ArcanistLinter {
             continue;
           }
 
+          if ($tok_type == 'T_BREAK'    ||
+              $tok_type == 'T_CONTINUE') {
+            if (empty($lower_level_tokens[$token_id])) {
+              $statement_ok = true;
+              $block_ok = true;
+            }
+            continue;
+          }
+
           if ($tok_type == 'T_RETURN'   ||
-              $tok_type == 'T_BREAK'    ||
-              $tok_type == 'T_CONTINUE' ||
               $tok_type == 'T_THROW'    ||
               $tok_type == 'T_EXIT') {
-            $statement_ok = true;
-            $block_ok = true;
+            if (empty($different_scope_tokens[$token_id])) {
+              $statement_ok = true;
+              $block_ok = true;
+            }
+            continue;
           }
         }
 
@@ -1096,7 +1168,7 @@ final class ArcanistXHPASTLinter extends ArcanistLinter {
           }
         }
 
-        // This is a declration, exclude it from the "declare variables prior
+        // This is a declaration, exclude it from the "declare variables prior
         // to use" check below.
         unset($all[$var->getID()]);
 
@@ -1700,8 +1772,9 @@ final class ArcanistXHPASTLinter extends ArcanistLinter {
           $this->raiseLintAtNode(
             $call,
             self::LINT_PREG_QUOTE_MISUSE,
-            'You should always pass two arguments to preg_quote(), so that ' .
-            'preg_quote() knows which delimiter to escape.');
+            'If you use pattern delimiters that require escaping (such as //, '.
+            'but not ()) then you should pass two arguments to preg_quote(), '.
+            'so that preg_quote() knows which delimiter to escape.');
         }
       }
     }

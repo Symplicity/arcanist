@@ -111,14 +111,18 @@ final class ArcanistSpellingLinter extends ArcanistLinter {
       if ($next === false) {
         return;
       }
+      $original = substr($text, $next, strlen($word));
+      $replacement = self::fixLetterCase($correct_word, $original);
       $this->raiseLintAtOffset(
         $next,
         $severity,
         sprintf(
-          "Possible spelling error.  You wrote '%s', but did you mean '%s'",
+          "Possible spelling error. You wrote '%s', but did you mean '%s'?",
           $word,
           $correct_word
-        )
+        ),
+        $original,
+        $replacement
       );
       $pos = $next + 1;
     }
@@ -137,15 +141,33 @@ final class ArcanistSpellingLinter extends ArcanistLinter {
       return;
     }
     foreach ($matches[0] as $match) {
+      $original = $match[0];
+      $replacement = self::fixLetterCase($correct_word, $original);
       $this->raiseLintAtOffset(
         $match[1],
         $severity,
         sprintf(
-          "Possible spelling error.  You wrote '%s', but did you mean '%s'",
+          "Possible spelling error. You wrote '%s', but did you mean '%s'?",
           $word,
           $correct_word
-        )
+        ),
+        $original,
+        $replacement
       );
     }
   }
+
+  public static function fixLetterCase($string, $case) {
+    if ($case == strtolower($case)) {
+      return strtolower($string);
+    }
+    if ($case == strtoupper($case)) {
+      return strtoupper($string);
+    }
+    if ($case == ucwords(strtolower($case))) {
+      return ucwords(strtolower($string));
+    }
+    return null;
+  }
+
 }

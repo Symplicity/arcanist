@@ -42,7 +42,7 @@
  * Arcanist workflows can read and write 'scratch files', which are temporary
  * files stored in the project that persist across commands. They can be useful
  * if you want to save some state, or keep a copy of a long message the user
- * entered in something goes wrong..
+ * entered if something goes wrong.
  *
  *
  * @task  conduit   Conduit
@@ -64,6 +64,7 @@ abstract class ArcanistBaseWorkflow {
   private $repositoryAPI;
   private $workingCopy;
   private $arguments;
+  private $passedArguments;
   private $command;
 
   private $repositoryEncoding;
@@ -74,9 +75,13 @@ abstract class ArcanistBaseWorkflow {
 
   private $changeCache = array();
 
+
   public function __construct() {
 
   }
+
+
+  abstract public function run();
 
 
 /* -(  Conduit  )------------------------------------------------------------ */
@@ -546,6 +551,10 @@ abstract class ArcanistBaseWorkflow {
     return idx($this->arguments, $key, $default);
   }
 
+  public function getPassedArguments() {
+    return $this->passedArguments;
+  }
+
   final public function getCompleteArgumentSpecification() {
     $spec = $this->getArguments();
     $arc_config = $this->getArcanistConfiguration();
@@ -555,6 +564,7 @@ abstract class ArcanistBaseWorkflow {
   }
 
   public function parseArguments(array $args) {
+    $this->passedArguments = $args;
 
     $spec = $this->getCompleteArgumentSpecification();
 
@@ -1092,7 +1102,7 @@ abstract class ArcanistBaseWorkflow {
    * @return void
    */
   protected function writeStatusMessage($msg) {
-    file_put_contents('php://stderr', $msg);
+    fwrite(STDERR, $msg);
   }
 
   protected function isHistoryImmutable() {
@@ -1318,6 +1328,17 @@ abstract class ArcanistBaseWorkflow {
     $parser = new ArcanistDiffParser();
     $parser->setWriteDiffOnFailure(true);
     return $parser;
+  }
+
+  protected function dispatchEvent($type, array $data) {
+    $data += array(
+      'workflow' => $this,
+    );
+
+    $event = new PhutilEvent($type, $data);
+    PhutilEventEngine::dispatchEvent($event);
+
+    return $event;
   }
 
 }

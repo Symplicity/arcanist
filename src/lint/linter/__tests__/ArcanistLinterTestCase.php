@@ -21,7 +21,7 @@
  *
  * @group testcase
  */
-abstract class ArcanistLinterTestCase extends ArcanistPhutilTestCase {
+abstract class ArcanistLinterTestCase extends ArcanistTestCase {
 
   public function executeTestsInDirectory($root, $linter, $working_copy) {
     foreach (Filesystem::listDirectory($root, $hidden = false) as $file) {
@@ -100,6 +100,8 @@ abstract class ArcanistLinterTestCase extends ArcanistPhutilTestCase {
 
     } catch (ArcanistPhutilTestTerminatedException $ex) {
       throw $ex;
+    } catch (ArcanistUsageException $ex) {
+      $this->assertSkipped($ex->getMessage());
     } catch (Exception $exception) {
       $caught_exception = true;
       $exception_message = $exception->getMessage()."\n\n".
