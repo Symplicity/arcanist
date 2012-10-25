@@ -352,7 +352,7 @@ class SympXHPASTLinter extends ArcanistLinter {
         continue;
       }
       $name_string = $name_token->getConcreteString();
-      if (!$this->isLowerCamelCase($name_string)) {
+      if (!$this->isLowerCamelCase($name_string) && !$this->isLowercaseWithUnderscores($name_string)) {
         $this->raiseLintAtNode(
           $name_token,
           self::LINT_NAMING_CONVENTIONS,
@@ -575,13 +575,15 @@ class SympXHPASTLinter extends ArcanistLinter {
         continue;
       } else {
         list($before, $after) = $operator->getSurroundingNonsemanticTokens();
-
         $replace = null;
         if (empty($before) && empty($after)) {
           $replace = " {$operator_value} ";
         } else if (empty($before)) {
           $replace = " {$operator_value}";
         } else if (empty($after)) {
+          if ($operator_value == '=') {
+            continue;
+          }
           $replace = "{$operator_value} ";
         }
 
