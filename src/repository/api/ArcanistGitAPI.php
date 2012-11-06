@@ -1,21 +1,5 @@
 <?php
 
-/*
- * Copyright 2012 Facebook, Inc.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *   http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
 /**
  * Interfaces with Git working copies.
  *
@@ -338,8 +322,10 @@ final class ArcanistGitAPI extends ArcanistRepositoryAPI {
     // But that may fail if you're not on a branch.
     list($stdout) = $this->execxLocal('branch --no-color');
 
+    // Assume that any branch beginning with '(' means 'no branch', or whatever
+    // 'no branch' is in the current locale.
     $matches = null;
-    if (preg_match('/^\* (.+)$/m', $stdout, $matches)) {
+    if (preg_match('/^\* ([^\(].*)$/m', $stdout, $matches)) {
       return $matches[1];
     }
     return null;
@@ -687,6 +673,11 @@ final class ArcanistGitAPI extends ArcanistRepositoryAPI {
 
   public function supportsRelativeLocalCommits() {
     return true;
+  }
+
+  public function setDefaultBaseCommit() {
+    $this->setRelativeCommit('HEAD^');
+    return $this;
   }
 
   public function hasLocalCommit($commit) {

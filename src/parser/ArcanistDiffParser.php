@@ -1,21 +1,5 @@
 <?php
 
-/*
- * Copyright 2012 Facebook, Inc.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *   http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
 /**
  * Parses diffs from a working copy.
  *
@@ -23,7 +7,7 @@
  */
 final class ArcanistDiffParser {
 
-  protected $api;
+  protected $repositoryAPI;
   protected $text;
   protected $line;
   protected $lineSaved;
@@ -37,13 +21,9 @@ final class ArcanistDiffParser {
   protected $changes = array();
   private $forcePath;
 
-  protected function setRepositoryAPI(ArcanistRepositoryAPI $api) {
-    $this->api = $api;
+  public function setRepositoryAPI(ArcanistRepositoryAPI $repository_api) {
+    $this->repositoryAPI = $repository_api;
     return $this;
-  }
-
-  protected function getRepositoryAPI() {
-    return $this->api;
   }
 
   public function setDetectBinaryFiles($detect) {
@@ -116,8 +96,9 @@ final class ArcanistDiffParser {
           $root = $rinfo['URL'].'/';
         }
         $cpath = $info['Copied From URL'];
-        $cpath = substr($cpath, strlen($root));
-        if ($info['Copied From Rev']) {
+        $root_len = strlen($root);
+        if (!strncmp($cpath, $root, $root_len)) {
+          $cpath = substr($cpath, $root_len);
           // The user can "svn cp /path/to/file@12345 x", which pulls a file out
           // of version history at a specific revision. If we just use the path,
           // we'll collide with possible changes to that path in the working
@@ -129,14 +110,16 @@ final class ArcanistDiffParser {
           // TODO: In theory, you could have an '@' in your path and this could
           // cause a collision, e.g. two files named 'f' and 'f@12345'. This is
           // at least somewhat the user's fault, though.
-          if ($info['Copied From Rev'] != $info['Revision']) {
-            $cpath .= '@'.$info['Copied From Rev'];
+          if ($info['Copied From Rev']) {
+            if ($info['Copied From Rev'] != $info['Revision']) {
+              $cpath .= '@'.$info['Copied From Rev'];
+            }
           }
+          $change->setOldPath($cpath);
+          $from[$path] = $cpath;
         }
-        $change->setOldPath($cpath);
-
-        $from[$path] = $cpath;
       }
+
       $type = $change->getType();
       if (($type === ArcanistDiffChangeType::TYPE_MOVE_AWAY ||
            $type === ArcanistDiffChangeType::TYPE_DELETE) &&
@@ -221,9 +204,7 @@ final class ArcanistDiffParser {
         '(?P<type>commit) (?P<hash>[a-f0-9]+)(?: \(.*\))?',
         // This is a git diff, probably from "git show" or "git diff".
         // Note that the filenames may appear quoted.
-        '(?P<type>diff --git) '.
-          '(?P<old>"?[abicwo12]/.+"?) '.
-          '(?P<cur>"?[abicwo12]/.+"?)',
+        '(?P<type>diff --git) (?P<oldnew>.*)',
         // This is a unified diff, probably from "diff -u" or synthetic diffing.
         '(?P<type>---) (?P<old>.+)\s+\d{4}-\d{2}-\d{2}.*',
         '(?P<binary>Binary) files '.
@@ -268,14 +249,9 @@ final class ArcanistDiffParser {
 
       if (isset($match['type'])) {
         if ($match['type'] == 'diff --git') {
-          if (isset($match['old'])) {
-            $match['old'] = $this->unescapeFilename($match['old']);
-            $match['old'] = substr($match['old'], 2);
-          }
-          if (isset($match['cur'])) {
-            $match['cur'] = $this->unescapeFilename($match['cur']);
-            $match['cur'] = substr($match['cur'], 2);
-          }
+          list($old, $new) = self::splitGitDiffPaths($match['oldnew']);
+          $match['old'] = $old;
+          $match['cur'] = $new;
         }
       }
 
@@ -335,6 +311,8 @@ final class ArcanistDiffParser {
     } while ($this->getLine() !== null);
 
     $this->didFinishParse();
+
+    $this->loadSyntheticData();
 
     return $this->changes;
   }
@@ -597,12 +575,12 @@ final class ArcanistDiffParser {
         }
 
         if (!empty($match['old'])) {
-          $match['old'] = $this->unescapeFilename($match['old']);
+          $match['old'] = self::unescapeFilename($match['old']);
           $change->setOldPath($match['old']);
         }
 
         if (!empty($match['cur'])) {
-          $match['cur'] = $this->unescapeFilename($match['cur']);
+          $match['cur'] = self::unescapeFilename($match['cur']);
           $change->setCurrentPath($match['cur']);
         }
 
@@ -648,7 +626,7 @@ final class ArcanistDiffParser {
     $line = $this->getLine();
 
     if ($is_svn) {
-      $ok = preg_match('/^=+$/', $line);
+      $ok = preg_match('/^=+\s*$/', $line);
       if (!$ok) {
         $this->didFailParse("Expected '=======================' divider line.");
       } else {
@@ -683,8 +661,8 @@ final class ArcanistDiffParser {
     }
 
     $is_binary_add = preg_match(
-      '/^Cannot display: file marked as a binary type.$/',
-      $line);
+      '/^Cannot display: file marked as a binary type\.$/',
+      rtrim($line));
     if ($is_binary_add) {
       $this->nextLine(); // Cannot display: file marked as a binary type.
       $this->nextNonemptyLine(); // svn:mime-type = application/octet-stream
@@ -696,7 +674,7 @@ final class ArcanistDiffParser {
     // WITHOUT a binary mime-type and is changed and given a binary mime-type.
     $is_binary_diff = preg_match(
       '/^Binary files .* and .* differ$/',
-      $line);
+      rtrim($line));
     if ($is_binary_diff) {
       $this->nextNonemptyLine(); // Binary files x and y differ
       $this->markBinary($change);
@@ -709,7 +687,7 @@ final class ArcanistDiffParser {
     // can not apply these patches.)
     $is_hg_binary_delete = preg_match(
       '/^Binary file .* has changed$/',
-      $line);
+      rtrim($line));
     if ($is_hg_binary_delete) {
       $this->nextNonemptyLine();
       $this->markBinary($change);
@@ -722,7 +700,7 @@ final class ArcanistDiffParser {
     // patch.
     $is_git_binary_patch = preg_match(
       '/^GIT binary patch$/',
-      $line);
+      rtrim($line));
     if ($is_git_binary_patch) {
       $this->nextLine();
       $this->parseGitBinaryPatch();
@@ -738,7 +716,7 @@ final class ArcanistDiffParser {
 
     if ($is_git) {
       // "git diff -b" ignores whitespace, but has an empty hunk target
-      if (preg_match('@^diff --git a/.*$@', $line)) {
+      if (preg_match('@^diff --git .*$@', $line)) {
         $this->nextLine();
         return null;
       }
@@ -1133,11 +1111,165 @@ final class ArcanistDiffParser {
   /**
    * Unescape escaped filenames, e.g. from "git diff".
    */
-  private function unescapeFilename($name) {
+  private static function unescapeFilename($name) {
     if (preg_match('/^".+"$/', $name)) {
       return stripcslashes(substr($name, 1, -1));
     } else {
       return $name;
     }
   }
+
+  private function loadSyntheticData() {
+    if (!$this->changes) {
+      return;
+    }
+
+    $repository_api = $this->repositoryAPI;
+    if (!$repository_api) {
+      return;
+    }
+
+    $changes = $this->changes;
+    foreach ($changes as $change) {
+      $path = $change->getCurrentPath();
+
+      // Certain types of changes (moves and copies) don't contain change data
+      // when expressed in raw "git diff" form. Augment any such diffs with
+      // textual data.
+      if ($change->getNeedsSyntheticGitHunks() &&
+          ($repository_api instanceof ArcanistGitAPI)) {
+        $diff = $repository_api->getRawDiffText($path, $moves = false);
+
+        // NOTE: We're reusing the parser and it doesn't reset change state
+        // between parses because there's an oddball SVN workflow in Phabricator
+        // which relies on being able to inject changes.
+        // TODO: Fix this.
+        $parser = clone $this;
+        $parser->setChanges(array());
+        $raw_changes = $parser->parseDiff($diff);
+
+        foreach ($raw_changes as $raw_change) {
+          if ($raw_change->getCurrentPath() == $path) {
+            $change->setFileType($raw_change->getFileType());
+            foreach ($raw_change->getHunks() as $hunk) {
+              // Git thinks that this file has been added. But we know that it
+              // has been moved or copied without a change.
+              $hunk->setCorpus(
+                preg_replace('/^\+/m', ' ', $hunk->getCorpus()));
+              $change->addHunk($hunk);
+            }
+            break;
+          }
+        }
+
+        $change->setNeedsSyntheticGitHunks(false);
+      }
+
+      if ($change->getFileType() != ArcanistDiffChangeType::FILE_BINARY &&
+          $change->getFileType() != ArcanistDiffChangeType::FILE_IMAGE) {
+        continue;
+      }
+
+      $change->setOriginalFileData($repository_api->getOriginalFileData($path));
+      $change->setCurrentFileData($repository_api->getCurrentFileData($path));
+    }
+
+    $this->changes = $changes;
+  }
+
+
+  /**
+   * Strip prefixes off paths from `git diff`. By default git uses a/ and b/,
+   * but you can set `diff.mnemonicprefix` to get a different set of prefixes,
+   * or use `--no-prefix`, `--src-prefix` or `--dst-prefix` to set these to
+   * other arbitrary values.
+   *
+   * We strip the default and mnemonic prefixes, and trust the user knows what
+   * they're doing in the other cases.
+   *
+   * @param   string Path to strip.
+   * @return  string Stripped path.
+   */
+  public static function stripGitPathPrefix($path) {
+
+    static $regex;
+    if ($regex === null) {
+      $prefixes = array(
+        // These are the defaults.
+        'a/',
+        'b/',
+
+        // These show up when you set "diff.mnemonicprefix".
+        'i/',
+        'c/',
+        'w/',
+        'o/',
+        '1/',
+        '2/',
+      );
+
+      foreach ($prefixes as $key => $prefix) {
+        $prefixes[$key] = preg_quote($prefix, '@');
+      }
+      $regex = '@^('.implode('|', $prefixes).')@S';
+    }
+
+    return preg_replace($regex, '', $path);
+  }
+
+
+  /**
+   * Split the paths on a "diff --git" line into old and new paths. This
+   * is difficult because they may be ambiguous if the files contain spaces.
+   *
+   * @param string Text from a diff line after "diff --git ".
+   * @return pair<string, string> Old and new paths.
+   */
+  public static function splitGitDiffPaths($paths) {
+    $matches = null;
+    $paths = rtrim($paths, "\r\n");
+
+    $patterns = array(
+      // Try quoted paths, used for unicode filenames or filenames with quotes.
+      '@^(?P<old>"(?:\\\\.|[^"\\\\]+)+") (?P<new>"(?:\\\\.|[^"\\\\]+)+")$@',
+
+      // Try paths without spaces.
+      '@^(?P<old>[^ ]+) (?P<new>[^ ]+)$@',
+
+      // Try paths with well-known prefixes.
+      '@^(?P<old>[abicwo12]/.*) (?P<new>[abicwo12]/.*)$@',
+
+      // Try the exact same string twice in a row separated by a space.
+      // This can hit a false positive for moves from files like "old file old"
+      // to "file", but such a case combined with custom diff prefixes is
+      // incredibly obscure.
+      '@^(?P<old>.*) (?P<new>\\1)$@',
+    );
+
+    foreach ($patterns as $pattern) {
+      if (preg_match($pattern, $paths, $matches)) {
+        break;
+      }
+    }
+
+    if (!$matches) {
+      throw new Exception(
+        "Input diff contains ambiguous line 'diff --git {$paths}'. This line ".
+        "is ambiguous because there are spaces in the file names, so the ".
+        "parser can not determine where the file names begin and end. To ".
+        "resolve this ambiguity, use standard prefixes ('a/' and 'b/') when ".
+        "generating diffs.");
+    }
+
+    $old = $matches['old'];
+    $old = self::unescapeFilename($old);
+    $old = self::stripGitPathPrefix($old);
+
+    $new = $matches['new'];
+    $new = self::unescapeFilename($new);
+    $new = self::stripGitPathPrefix($new);
+
+    return array($old, $new);
+  }
+
 }
