@@ -526,6 +526,9 @@ EOTEXT
       case 'hg-patch.hgdiff':
         $this->assertEqual(1, count($changes));
         break;
+      case 'hg-patch-git.hgdiff':
+        $this->assertEqual(1, count($changes));
+        break;
       case 'custom-prefixes.gitdiff':
         $this->assertEqual(1, count($changes));
         $change = head($changes);
@@ -534,6 +537,9 @@ EOTEXT
           $change->getCurrentPath());
         break;
       case 'more-newlines.svndiff':
+        $this->assertEqual(1, count($changes));
+        break;
+      case 'suppress-blank-empty.gitdiff':
         $this->assertEqual(1, count($changes));
         break;
       default:

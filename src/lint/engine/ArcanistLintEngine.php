@@ -3,12 +3,12 @@
 /**
  * Manages lint execution. When you run 'arc lint' or 'arc diff', Arcanist
  * checks your .arcconfig to see if you have specified a lint engine in the
- * key "lint_engine". The engine must extend this class. For example:
+ * key "lint.engine". The engine must extend this class. For example:
  *
  *  lang=js
  *  {
  *    // ...
- *    "lint_engine" : "ExampleLintEngine",
+ *    "lint.engine" : "ExampleLintEngine",
  *    // ...
  *  }
  *
@@ -50,7 +50,11 @@ abstract class ArcanistLintEngine {
 
   protected $charToLine = array();
   protected $lineToFirstChar = array();
+  private $cachedResults;
+  private $cacheVersion;
+  private $repositoryVersion;
   private $results = array();
+  private $stopped = array();
   private $minimumSeverity = ArcanistLintSeverity::SEVERITY_DISABLED;
 
   private $changedLines = array();
@@ -162,7 +166,6 @@ abstract class ArcanistLintEngine {
   }
 
   public function run() {
-    $stopped = array();
     $linters = $this->buildLinters();
 
     if (!$linters) {
@@ -181,21 +184,58 @@ abstract class ArcanistLintEngine {
       throw new ArcanistNoEffectException("No paths are lintable.");
     }
 
+    $versions = array($this->getCacheVersion());
+    foreach ($linters as $linter) {
+      $linter->setEngine($this);
+      $versions[] = get_class($linter).':'.$linter->getCacheVersion();
+    }
+    $this->cacheVersion = crc32(implode("\n", $versions));
+
+    $this->stopped = array();
     $exceptions = array();
     foreach ($linters as $linter_name => $linter) {
+      if (!is_string($linter_name)) {
+        $linter_name = get_class($linter);
+      }
       try {
-        $linter->setEngine($this);
         if (!$linter->canRun()) {
           continue;
         }
         $paths = $linter->getPaths();
 
+        $cache_granularity = $linter->getCacheGranularity();
+
         foreach ($paths as $key => $path) {
           // Make sure each path has a result generated, even if it is empty
           // (i.e., the file has no lint messages).
           $result = $this->getResultForPath($path);
-          if (isset($stopped[$path])) {
+          if (isset($this->stopped[$path])) {
             unset($paths[$key]);
+          }
+          if (isset($this->cachedResults[$path][$this->cacheVersion])) {
+            $cached_result = $this->cachedResults[$path][$this->cacheVersion];
+
+            switch ($cache_granularity) {
+              case ArcanistLinter::GRANULARITY_FILE:
+                $use_cache = true;
+                break;
+              case ArcanistLinter::GRANULARITY_DIRECTORY:
+              case ArcanistLinter::GRANULARITY_REPOSITORY:
+                $repository_version = idx($cached_result, 'repository_version');
+                $use_cache = ($this->repositoryVersion == $repository_version);
+                break;
+              default:
+                $use_cache = false;
+                break;
+            }
+
+            if ($use_cache) {
+              unset($paths[$key]);
+
+              if (idx($cached_result, 'stopped') == $linter_name) {
+                $this->stopped[$path] = $linter_name;
+              }
+            }
           }
         }
         $paths = array_values($paths);
@@ -206,27 +246,45 @@ abstract class ArcanistLintEngine {
             $linter->willLintPath($path);
             $linter->lintPath($path);
             if ($linter->didStopAllLinters()) {
-              $stopped[$path] = true;
+              $this->stopped[$path] = $linter_name;
             }
           }
         }
 
-        $minimum = $this->minimumSeverity;
-        foreach ($linter->getLintMessages() as $message) {
-          if (!ArcanistLintSeverity::isAtLeastAsSevere($message, $minimum)) {
-            continue;
-          }
-          if (!$this->isRelevantMessage($message)) {
-            continue;
-          }
-          $result = $this->getResultForPath($message->getPath());
-          $result->addMessage($message);
-        }
       } catch (Exception $ex) {
-        if (!is_string($linter_name)) {
-          $linter_name = get_class($linter);
-        }
         $exceptions[$linter_name] = $ex;
+      }
+    }
+
+    $this->didRunLinters($linters);
+
+    foreach ($linters as $linter) {
+      $minimum = $this->minimumSeverity;
+      $cache_granularity = $linter->getCacheGranularity();
+      foreach ($linter->getLintMessages() as $message) {
+        if (!ArcanistLintSeverity::isAtLeastAsSevere($message, $minimum)) {
+          continue;
+        }
+        if (!$this->isRelevantMessage($message)) {
+          continue;
+        }
+        if ($cache_granularity == ArcanistLinter::GRANULARITY_GLOBAL) {
+          $message->setUncacheable(true);
+        }
+        $result = $this->getResultForPath($message->getPath());
+        $result->addMessage($message);
+      }
+    }
+
+    if ($this->cachedResults) {
+      foreach ($this->cachedResults as $path => $messages) {
+        $messages = idx($messages, $this->cacheVersion, array());
+        unset($messages['stopped']);
+        unset($messages['repository_version']);
+        foreach ($messages as $message) {
+          $this->getResultForPath($path)->addMessage(
+            ArcanistLintMessage::newFromDictionary($message));
+        }
       }
     }
 
@@ -258,43 +316,84 @@ abstract class ArcanistLintEngine {
     return $this->results;
   }
 
+  /**
+   * @param dict<string path, dict<string version, list<dict message>>>
+   * @return this
+   */
+  public function setCachedResults(array $results) {
+    $this->cachedResults = $results;
+    return $this;
+  }
+
   public function getResults() {
     return $this->results;
   }
 
+  public function getStoppedPaths() {
+    return $this->stopped;
+  }
+
   abstract protected function buildLinters();
 
-  private function isRelevantMessage($message) {
+  protected function didRunLinters(array $linters) {
+    assert_instances_of($linters, 'ArcanistLinter');
+    foreach ($linters as $linter) {
+      $linter->didRunLinters();
+    }
+  }
+
+  public function setRepositoryVersion($version) {
+    $this->repositoryVersion = $version;
+    return $this;
+  }
+
+  private function isRelevantMessage(ArcanistLintMessage $message) {
     // When a user runs "arc lint", we default to raising only warnings on
     // lines they have changed (errors are still raised anywhere in the
     // file). The list of $changed lines may be null, to indicate that the
     // path is a directory or a binary file so we should not exclude
     // warnings.
 
-    $changed = $this->getPathChangedLines($message->getPath());
-
-    if ($changed === null || $message->isError() || !$message->getLine()) {
+    if (!$this->changedLines || $message->isError()) {
       return true;
     }
 
-    $last_line = $message->getLine();
-    if ($message->getOriginalText()) {
-      $last_line += substr_count($message->getOriginalText(), "\n");
-    }
+    $locations = $message->getOtherLocations();
+    $locations[] = $message->toDictionary();
 
-    for ($l = $message->getLine(); $l <= $last_line; $l++) {
-      if (!empty($changed[$l])) {
+    foreach ($locations as $location) {
+      $path = idx($location, 'path', $message->getPath());
+
+      if (!array_key_exists($path, $this->changedLines)) {
+        continue;
+      }
+
+      $changed = $this->getPathChangedLines($path);
+
+      if ($changed === null || !$location['line']) {
         return true;
+      }
+
+      $last_line = $location['line'];
+      if (isset($location['original'])) {
+        $last_line += substr_count($location['original'], "\n");
+      }
+
+      for ($l = $location['line']; $l <= $last_line; $l++) {
+        if (!empty($changed[$l])) {
+          return true;
+        }
       }
     }
 
     return false;
   }
 
-  private function getResultForPath($path) {
+  protected function getResultForPath($path) {
     if (empty($this->results[$path])) {
       $result = new ArcanistLintResult();
       $result->setPath($path);
+      $result->setCacheVersion($this->cacheVersion);
       $this->results[$path] = $result;
     }
     return $this->results[$path];
@@ -334,6 +433,10 @@ abstract class ArcanistLintEngine {
   public function setPostponedLinters(array $linters) {
     $this->postponedLinters = $linters;
     return $this;
+  }
+
+  protected function getCacheVersion() {
+    return 1;
   }
 
   protected function getPEP8WithTextOptions() {

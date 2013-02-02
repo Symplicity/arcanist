@@ -8,6 +8,11 @@
  */
 abstract class ArcanistLinter {
 
+  const GRANULARITY_FILE = 1;
+  const GRANULARITY_DIRECTORY = 2;
+  const GRANULARITY_REPOSITORY = 3;
+  const GRANULARITY_GLOBAL = 4;
+
   protected $paths  = array();
   protected $data   = array();
   protected $engine;
@@ -81,6 +86,10 @@ abstract class ArcanistLinter {
     return $this->engine;
   }
 
+  public function getCacheVersion() {
+    return 0;
+  }
+
   public function getLintMessageFullCode($short_code) {
     return $this->getLinterName().$short_code;
   }
@@ -126,6 +135,17 @@ abstract class ArcanistLinter {
     return $this->messages;
   }
 
+  protected function newLintAtLine($line, $char, $code, $desc) {
+    return id(new ArcanistLintMessage())
+      ->setPath($this->getActivePath())
+      ->setLine($line)
+      ->setChar($char)
+      ->setCode($this->getLintMessageFullCode($code))
+      ->setSeverity($this->getLintMessageSeverity($code))
+      ->setName($this->getLintMessageName($code))
+      ->setDescription($desc);
+  }
+
   protected function raiseLintAtLine(
     $line,
     $char,
@@ -134,24 +154,11 @@ abstract class ArcanistLinter {
     $original = null,
     $replacement = null) {
 
-    $dict = array(
-      'path'          => $this->getActivePath(),
-      'line'          => $line,
-      'char'          => $char,
-      'code'          => $this->getLintMessageFullCode($code),
-      'severity'      => $this->getLintMessageSeverity($code),
-      'name'          => $this->getLintMessageName($code),
-      'description'   => $desc,
-    );
+    $message = $this->newLintAtLine($line, $char, $code, $desc)
+      ->setOriginalText($original)
+      ->setReplacementText($replacement);
 
-    if ($original !== null) {
-      $dict['original'] = $original;
-    }
-    if ($replacement !== null) {
-      $dict['replacement'] = $replacement;
-    }
-
-    return $this->addLintMessage(ArcanistLintMessage::newFromDictionary($dict));
+    return $this->addLintMessage($message);
   }
 
   protected function raiseLintAtPath(
@@ -199,12 +206,20 @@ abstract class ArcanistLinter {
   abstract public function lintPath($path);
   abstract public function getLinterName();
 
+  public function didRunLinters() {
+    // This is a hook.
+  }
+
   public function getLintSeverityMap() {
     return array();
   }
 
   public function getLintNameMap() {
     return array();
+  }
+
+  public function getCacheGranularity() {
+    return self::GRANULARITY_FILE;
   }
 
 }

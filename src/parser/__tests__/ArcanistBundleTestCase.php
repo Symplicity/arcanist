@@ -40,10 +40,27 @@ final class ArcanistBundleTestCase extends ArcanistTestCase {
     }
 
     $archive = dirname(__FILE__).'/bundle.git.tgz';
-    $patches = dirname(__FILE__).'/patches/';
     $fixture = PhutilDirectoryFixture::newFromArchive($archive);
 
+    $old_dir = getcwd();
     chdir($fixture->getPath());
+
+    $caught = null;
+    try {
+      $this->runGitRepositoryTests($fixture);
+    } catch (Exception $ex) {
+      $caught = $ex;
+    }
+
+    chdir($old_dir);
+
+    if ($caught) {
+      throw $ex;
+    }
+  }
+
+  private function runGitRepositoryTests(PhutilDirectoryFixture $fixture) {
+    $patches = dirname(__FILE__).'/patches/';
 
     list($commits) = execx(
       'git log --format=%s',
@@ -58,8 +75,12 @@ final class ArcanistBundleTestCase extends ArcanistTestCase {
       list($commit_hash, $tree_hash, $subject) = explode(' ', $commit, 3);
       execx('git reset --hard %s --', $commit_hash);
 
-      $repository_api = new ArcanistGitAPI($fixture->getPath());
-      $repository_api->setDefaultBaseCommit();
+      $fixture_path = $fixture->getPath();
+      $working_copy = ArcanistWorkingCopyIdentity::newFromPath($fixture_path);
+
+      $repository_api = ArcanistRepositoryAPI::newAPIFromWorkingCopyIdentity(
+        $working_copy);
+      $repository_api->setBaseCommitArgumentRules('arc:this');
       $diff = $repository_api->getFullGitDiff();
 
       $parser = new ArcanistDiffParser();
@@ -130,6 +151,60 @@ final class ArcanistBundleTestCase extends ArcanistTestCase {
     }
 
     switch ($commit) {
+      case '1830a13adf764b55743f7edc6066451898d8ffa4':
+        // "Mark koan2 as +x and edit it."
+
+        $this->assertEqual(1, count($changes));
+
+        $c = $changes['koan2'];
+        $this->assertEqual(
+          ArcanistDiffChangeType::TYPE_CHANGE,
+          $c->getType());
+
+        $this->assertEqual(
+          '100644',
+          idx($c->getOldProperties(), 'unix:filemode'));
+
+        $this->assertEqual(
+          '100755',
+          idx($c->getNewProperties(), 'unix:filemode'));
+        break;
+      case '8ecc728bcc9b482a9a91527ea471b04fc1a025cf':
+        // "Move 'text' to 'executable' and mark it +x."
+
+        $this->assertEqual(2, count($changes));
+
+        $c = $changes['executable'];
+        $this->assertEqual(
+          ArcanistDiffChangeType::TYPE_MOVE_HERE,
+          $c->getType());
+
+        $this->assertEqual(
+          '100644',
+          idx($c->getOldProperties(), 'unix:filemode'));
+
+        $this->assertEqual(
+          '100755',
+          idx($c->getNewProperties(), 'unix:filemode'));
+        break;
+      case '39c8e7dd3914edff087a6214f0cd996ad08e5b3d':
+        // "Mark koan as +x."
+        // Primarily a test against a recusive synthetic hunk construction bug.
+        $this->assertEqual(1, count($changes));
+
+        $c = $changes['koan'];
+        $this->assertEqual(
+          ArcanistDiffChangeType::TYPE_CHANGE,
+          $c->getType());
+
+        $this->assertEqual(
+          '100644',
+          idx($c->getOldProperties(), 'unix:filemode'));
+
+        $this->assertEqual(
+          '100755',
+          idx($c->getNewProperties(), 'unix:filemode'));
+        break;
       case 'c573c25d1a767d270fed504cd993e78aba936338':
         // "Copy a koan over text, editing the original koan."
         // Git doesn't really do anything meaningful with this.

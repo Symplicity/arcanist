@@ -46,9 +46,16 @@ class PhutilLintEngine extends ArcanistLintEngine {
     $linters[] = id(new ArcanistTextLinter())->setPaths($text_paths);
     $linters[] = id(new ArcanistSpellingLinter())->setPaths($text_paths);
 
-    $linters[] = id(new ArcanistXHPASTLinter())
+    $php_paths = preg_grep('/\.php$/', $paths);
+
+    $xhpast_linter = id(new ArcanistXHPASTLinter())
       ->setCustomSeverityMap($this->getXHPASTSeverityMap())
-      ->setPaths(preg_grep('/\.php$/', $paths));
+      ->setPaths($php_paths);
+    $linters[] = $xhpast_linter;
+
+    $linters[] = id(new ArcanistPhutilXHPASTLinter())
+      ->setXHPASTLinter($xhpast_linter)
+      ->setPaths($php_paths);
 
     return $linters;
   }
@@ -56,14 +63,14 @@ class PhutilLintEngine extends ArcanistLintEngine {
   private function getXHPASTSeverityMap() {
     $error = ArcanistLintSeverity::SEVERITY_ERROR;
     $warning = ArcanistLintSeverity::SEVERITY_WARNING;
+    $advice = ArcanistLintSeverity::SEVERITY_ADVICE;
 
     return array(
       ArcanistXHPASTLinter::LINT_PHP_53_FEATURES          => $error,
       ArcanistXHPASTLinter::LINT_PHP_54_FEATURES          => $error,
-      ArcanistXHPASTLinter::LINT_PHT_WITH_DYNAMIC_STRING  => $error,
       ArcanistXHPASTLinter::LINT_COMMENT_SPACING          => $error,
-
       ArcanistXHPASTLinter::LINT_RAGGED_CLASSTREE_EDGE    => $warning,
+      ArcanistXHPASTLinter::LINT_TODO_COMMENT             => $advice,
     );
   }
 }

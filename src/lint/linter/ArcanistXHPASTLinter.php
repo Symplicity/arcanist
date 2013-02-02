@@ -5,7 +5,7 @@
  *
  * @group linter
  */
-final class ArcanistXHPASTLinter extends ArcanistLinter {
+final class ArcanistXHPASTLinter extends ArcanistBaseXHPASTLinter {
 
   protected $trees = array();
 
@@ -40,7 +40,6 @@ final class ArcanistXHPASTLinter extends ArcanistLinter {
   const LINT_IMPLICIT_FALLTHROUGH      = 30;
   const LINT_PHP_53_FEATURES           = 31;
   const LINT_REUSED_AS_ITERATOR        = 32;
-  const LINT_PHT_WITH_DYNAMIC_STRING   = 33;
   const LINT_COMMENT_SPACING           = 34;
   const LINT_PHP_54_FEATURES           = 35;
   const LINT_SLOWNESS                  = 36;
@@ -80,7 +79,6 @@ final class ArcanistXHPASTLinter extends ArcanistLinter {
       self::LINT_PHP_53_FEATURES           => 'Use Of PHP 5.3 Features',
       self::LINT_PHP_54_FEATURES           => 'Use Of PHP 5.4 Features',
       self::LINT_REUSED_AS_ITERATOR        => 'Variable Reused As Iterator',
-      self::LINT_PHT_WITH_DYNAMIC_STRING   => 'Use of pht() on Dynamic String',
       self::LINT_COMMENT_SPACING           => 'Comment Spaces',
       self::LINT_SLOWNESS                  => 'Slow Construct',
     );
@@ -91,59 +89,53 @@ final class ArcanistXHPASTLinter extends ArcanistLinter {
   }
 
   public function getLintSeverityMap() {
-    return array(
-      self::LINT_TODO_COMMENT => ArcanistLintSeverity::SEVERITY_DISABLED,
-      self::LINT_UNABLE_TO_PARSE
-        => ArcanistLintSeverity::SEVERITY_WARNING,
-      self::LINT_NAMING_CONVENTIONS
-        => ArcanistLintSeverity::SEVERITY_WARNING,
-      self::LINT_PREG_QUOTE_MISUSE
-        => ArcanistLintSeverity::SEVERITY_ADVICE,
-      self::LINT_BRACE_FORMATTING
-        => ArcanistLintSeverity::SEVERITY_WARNING,
-      self::LINT_PARENTHESES_SPACING
-        => ArcanistLintSeverity::SEVERITY_WARNING,
-      self::LINT_CONTROL_STATEMENT_SPACING
-        => ArcanistLintSeverity::SEVERITY_WARNING,
-      self::LINT_BINARY_EXPRESSION_SPACING
-        => ArcanistLintSeverity::SEVERITY_WARNING,
-      self::LINT_ARRAY_INDEX_SPACING
-        => ArcanistLintSeverity::SEVERITY_WARNING,
-      self::LINT_IMPLICIT_FALLTHROUGH
-        => ArcanistLintSeverity::SEVERITY_WARNING,
-      self::LINT_PHT_WITH_DYNAMIC_STRING
-        => ArcanistLintSeverity::SEVERITY_DISABLED,
-      self::LINT_SLOWNESS
-        => ArcanistLintSeverity::SEVERITY_WARNING,
+    $disabled = ArcanistLintSeverity::SEVERITY_DISABLED;
+    $advice   = ArcanistLintSeverity::SEVERITY_ADVICE;
+    $warning  = ArcanistLintSeverity::SEVERITY_WARNING;
 
-      self::LINT_COMMENT_SPACING
-        => ArcanistLintSeverity::SEVERITY_ADVICE,
+    return array(
+      self::LINT_TODO_COMMENT              => $disabled,
+      self::LINT_UNABLE_TO_PARSE           => $warning,
+      self::LINT_NAMING_CONVENTIONS        => $warning,
+      self::LINT_PREG_QUOTE_MISUSE         => $advice,
+      self::LINT_BRACE_FORMATTING          => $warning,
+      self::LINT_PARENTHESES_SPACING       => $warning,
+      self::LINT_CONTROL_STATEMENT_SPACING => $warning,
+      self::LINT_BINARY_EXPRESSION_SPACING => $warning,
+      self::LINT_ARRAY_INDEX_SPACING       => $warning,
+      self::LINT_IMPLICIT_FALLTHROUGH      => $warning,
+      self::LINT_SLOWNESS                  => $warning,
+      self::LINT_COMMENT_SPACING           => $advice,
 
       // This is disabled by default because it implies a very strict policy
       // which isn't necessary in the general case.
-      self::LINT_RAGGED_CLASSTREE_EDGE
-        => ArcanistLintSeverity::SEVERITY_DISABLED,
+      self::LINT_RAGGED_CLASSTREE_EDGE     => $disabled,
 
       // This is disabled by default because projects don't necessarily target
       // a specific minimum version.
-      self::LINT_PHP_53_FEATURES
-        => ArcanistLintSeverity::SEVERITY_DISABLED,
-      self::LINT_PHP_54_FEATURES
-        => ArcanistLintSeverity::SEVERITY_DISABLED,
+      self::LINT_PHP_53_FEATURES           => $disabled,
+      self::LINT_PHP_54_FEATURES           => $disabled,
     );
   }
 
   public function willLintPaths(array $paths) {
     $futures = array();
     foreach ($paths as $path) {
+      if (array_key_exists($path, $this->trees)) {
+        continue;
+      }
       $futures[$path] = xhpast_get_parser_future($this->getData($path));
     }
     foreach (Futures($futures)->limit(8) as $path => $future) {
       $this->willLintPath($path);
+      $this->trees[$path] = null;
       try {
         $this->trees[$path] = XHPASTTree::newFromDataAndResolvedExecFuture(
           $this->getData($path),
           $future->resolve());
+        $root = $this->trees[$path]->getRootNode();
+        $root->buildSelectCache();
+        $root->buildTokenCache();
       } catch (XHPASTSyntaxErrorException $ex) {
         $this->raiseLintAtLine(
           $ex->getErrorLine(),
@@ -167,15 +159,21 @@ final class ArcanistXHPASTLinter extends ArcanistLinter {
     return idx($this->trees, $path);
   }
 
+  public function getCacheVersion() {
+    $version = '2';
+    $path = xhpast_get_binary_path();
+    if (Filesystem::pathExists($path)) {
+      $version .= '-'.md5_file($path);
+    }
+    return $version;
+  }
+
   public function lintPath($path) {
-    if (empty($this->trees[$path])) {
+    if (!$this->trees[$path]) {
       return;
     }
 
     $root = $this->trees[$path]->getRootNode();
-
-    $root->buildSelectCache();
-    $root->buildTokenCache();
 
     $this->lintUseOfThisInStaticMethods($root);
     $this->lintDynamicDefines($root);
@@ -203,7 +201,6 @@ final class ArcanistXHPASTLinter extends ArcanistLinter {
     $this->lintImplicitFallthrough($root);
     $this->lintPHP53Features($root);
     $this->lintPHP54Features($root);
-    $this->lintPHT($root);
     $this->lintStrposUsedForStart($root);
     $this->lintStrstrUsedForCheck($root);
   }
@@ -293,41 +290,6 @@ final class ArcanistXHPASTLinter extends ArcanistLinter {
     }
   }
 
-  public function lintPHT($root) {
-    $calls = $root->selectDescendantsOfType('n_FUNCTION_CALL');
-    foreach ($calls as $call) {
-      $name = strtolower($call->getChildByIndex(0)->getConcreteString());
-      if ($name != 'pht') {
-        continue;
-      }
-
-      $parameters = $call->getChildOfType(1, 'n_CALL_PARAMETER_LIST');
-      if (!$parameters->getChildren()) {
-        continue;
-      }
-
-      $identifier = $parameters->getChildByIndex(0);
-      if ($identifier->getTypeName() == 'n_STRING_SCALAR') {
-        continue;
-      }
-
-      if ($identifier->getTypeName() == 'n_CONCATENATION_LIST') {
-        foreach ($identifier->getChildren() as $child) {
-          if ($child->getTypeName() == 'n_STRING_SCALAR' ||
-              $child->getTypeName() == 'n_OPERATOR') {
-            continue 2;
-          }
-        }
-      }
-
-      $this->raiseLintAtNode(
-        $call,
-        self::LINT_PHT_WITH_DYNAMIC_STRING,
-        "The first parameter of pht() can be only a scalar string, ".
-          "otherwise it can't be extracted.");
-    }
-  }
-
   public function lintPHP53Features($root) {
 
     $functions = $root->selectTokensOfType('T_FUNCTION');
@@ -378,7 +340,10 @@ final class ArcanistXHPASTLinter extends ArcanistLinter {
 
     $statics = $root->selectDescendantsOfType('n_CLASS_STATIC_ACCESS');
     foreach ($statics as $static) {
-      $name = $static->getChildOfType(0, 'n_CLASS_NAME');
+      $name = $static->getChildByIndex(0);
+      if ($name->getTypeName() != 'n_CLASS_NAME') {
+        continue;
+      }
       if ($name->getConcreteString() == 'static') {
         $this->raiseLintAtNode(
           $name,
@@ -397,6 +362,17 @@ final class ArcanistXHPASTLinter extends ArcanistLinter {
           self::LINT_PHP_53_FEATURES,
           'This codebase targets PHP 5.2, but short ternary was not '.
           'introduced until PHP 5.3.');
+      }
+    }
+
+    $heredocs = $root->selectDescendantsOfType('n_HEREDOC');
+    foreach ($heredocs as $heredoc) {
+      if (preg_match('/^<<<[\'"]/', $heredoc->getConcreteString())) {
+        $this->raiseLintAtNode(
+          $heredoc,
+          self::LINT_PHP_53_FEATURES,
+          'This codebase targets PHP 5.2, but nowdoc was not introduced until '.
+          'PHP 5.3.');
       }
     }
 
@@ -1988,32 +1964,6 @@ final class ArcanistXHPASTLinter extends ArcanistLinter {
           "a docblock marking it '@concrete-extensible'.");
       }
     }
-  }
-
-  protected function raiseLintAtToken(
-    XHPASTToken $token,
-    $code,
-    $desc,
-    $replace = null) {
-    return $this->raiseLintAtOffset(
-      $token->getOffset(),
-      $code,
-      $desc,
-      $token->getValue(),
-      $replace);
-  }
-
-  protected function raiseLintAtNode(
-    XHPASTNode $node,
-    $code,
-    $desc,
-    $replace = null) {
-    return $this->raiseLintAtOffset(
-      $node->getOffset(),
-      $code,
-      $desc,
-      $node->getConcreteString(),
-      $replace);
   }
 
   public function getSuperGlobalNames() {

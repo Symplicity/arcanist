@@ -1,0 +1,27 @@
+<?php
+pht('a');
+pht("a");
+pht('a'.'b');
+pht(f());
+pht();
+pht($a);
+pht('a'.$a);
+pht('$a');
+pht("$a");
+pht('%s', $a);
+
+pht(<<<EOT
+a
+EOT
+);
+
+pht(<<<EOT
+$a
+EOT
+);
+~~~~~~~~~~
+error:5:1
+error:7:1
+error:8:1
+error:10:1
+error:18:1

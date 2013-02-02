@@ -188,11 +188,11 @@ final class ArcanistDiffParser {
   }
 
   public function parseDiff($diff) {
-    $this->didStartParse($diff);
-
-    if ($this->getLine() === null) {
-      $this->didFailParse("Can't parse an empty diff!");
+    if (!strlen(trim($diff))) {
+      throw new Exception("Can't parse an empty diff!");
     }
+
+    $this->didStartParse($diff);
 
     do {
       $patterns = array(
@@ -210,7 +210,6 @@ final class ArcanistDiffParser {
         '(?P<binary>Binary) files '.
           '(?P<old>.+)\s+\d{4}-\d{2}-\d{2} and '.
           '(?P<new>.+)\s+\d{4}-\d{2}-\d{2} differ.*',
-
         // This is a normal Mercurial text change, probably from "hg diff". It
         // may have two "-r" blocks if it came from "hg diff -r x:y".
         '(?P<type>diff -r) (?P<hgrev>[a-f0-9]+) (?:-r [a-f0-9]+ )?(?P<cur>.+)',
@@ -226,7 +225,7 @@ final class ArcanistDiffParser {
         // contains some meta information and comment at the beginning
         // (isFirstNonEmptyLine() to check for beginning). Actual mercurial
         // code detects where comment ends and unified diff starts by
-        // searching "diff -r" in the text.
+        // searching for "diff -r" or "diff --git" in the text.
         $this->saveLine();
         $line = $this->nextLineThatLooksLikeDiffStart();
         if (!$this->tryMatchHeader($patterns, $line, $match)) {
@@ -543,9 +542,15 @@ final class ArcanistDiffParser {
             //
             // ...i.e., there is no associated diff.
 
-            $change->setNeedsSyntheticGitHunks(true);
-            if ($move_source) {
-              $move_source->setNeedsSyntheticGitHunks(true);
+            // This allows us to distinguish between property changes only
+            // and actual moves. For property changes only, we can't currently
+            // build a synthetic diff correctly, so just skip it.
+            // TODO: Build synthetic diffs for property changes, too.
+            if ($change->getType() != ArcanistDiffChangeType::TYPE_CHANGE) {
+              $change->setNeedsSyntheticGitHunks(true);
+              if ($move_source) {
+                $move_source->setNeedsSyntheticGitHunks(true);
+              }
             }
             return;
           }
@@ -834,12 +839,17 @@ final class ArcanistDiffParser {
       $add = 0;
       $del = 0;
 
-      $advance = false;
+      $hit_next_hunk = false;
       while ((($line = $this->nextLine()) !== null)) {
-        if (strlen($line)) {
+        if (strlen(rtrim($line, "\r\n"))) {
           $char = $line[0];
         } else {
-          $char = '~';
+          // Normally, we do not encouter empty lines in diffs, because
+          // unchanged lines have an initial space. However, in Git, with
+          // the option `diff.suppress-blank-empty` set, unchanged blank lines
+          // emit as completely empty. If we encounter a completely empty line,
+          // treat it as a ' ' (i.e., unchanged empty line) line.
+          $char = ' ';
         }
         switch ($char) {
           case '\\':
@@ -855,20 +865,19 @@ final class ArcanistDiffParser {
               $hunk->setIsMissingNewNewline(true);
             }
             if (!$new_len) {
-              $advance = true;
               break 2;
             }
             break;
           case '+':
-            if (!$new_len) {
-              break 2;
-            }
             ++$add;
             --$new_len;
             $real[] = $line;
             break;
           case '-':
             if (!$old_len) {
+              // In this case, we've hit "---" from a new file. So don't
+              // advance the line cursor.
+              $hit_next_hunk = true;
               break 2;
             }
             ++$del;
@@ -883,17 +892,14 @@ final class ArcanistDiffParser {
             --$new_len;
             $real[] = $line;
             break;
-          case "\r":
-          case "\n":
-          case '~':
-            $advance = true;
-            break 2;
           default:
+            // We hit something, likely another hunk.
+            $hit_next_hunk = true;
             break 2;
         }
       }
 
-      if ($old_len != 0 || $new_len != 0) {
+      if ($old_len || $new_len) {
         $this->didFailParse("Found the wrong number of hunk lines.");
       }
 
@@ -933,7 +939,7 @@ final class ArcanistDiffParser {
         $change->addHunk($hunk);
       }
 
-      if ($advance) {
+      if (!$hit_next_hunk) {
         $line = $this->nextNonemptyLine();
       }
 
@@ -1042,7 +1048,7 @@ final class ArcanistDiffParser {
 
   protected function nextLineThatLooksLikeDiffStart() {
     while (($line = $this->nextLine()) !== null) {
-      if (preg_match('/^\s*diff\s+-r/', $line)) {
+      if (preg_match('/^\s*diff\s+-(?:r|-git)/', $line)) {
         break;
       }
     }
