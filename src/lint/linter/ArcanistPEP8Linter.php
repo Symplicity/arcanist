@@ -5,11 +5,7 @@
  *
  * @group linter
  */
-final class ArcanistPEP8Linter extends ArcanistLinter {
-
-  public function willLintPaths(array $paths) {
-    return;
-  }
+final class ArcanistPEP8Linter extends ArcanistFutureLinter {
 
   public function getLinterName() {
     return 'PEP8';
@@ -81,16 +77,30 @@ final class ArcanistPEP8Linter extends ArcanistLinter {
     return $bin;
   }
 
-  public function lintPath($path) {
+  protected function buildFutures(array $paths) {
+    $severity = ArcanistLintSeverity::SEVERITY_WARNING;
+    if (!$this->getEngine()->isSeverityEnabled($severity)) {
+      return;
+    }
+
     $pep8_bin = $this->getPEP8Path();
     $options = $this->getPEP8Options();
 
-    list($rc, $stdout) = exec_manual(
-      "%C %C %s",
-      $pep8_bin,
-      $options,
-      $this->getEngine()->getFilePathOnDisk($path));
+    $futures = array();
 
+    foreach ($paths as $path) {
+      $futures[$path] = new ExecFuture(
+        "%C %C %s",
+        $pep8_bin,
+        $options,
+        $this->getEngine()->getFilePathOnDisk($path));
+    }
+
+    return $futures;
+  }
+
+  protected function resolveFuture($path, Future $future) {
+    list($rc, $stdout) = $future->resolve();
     $lines = explode("\n", $stdout);
     $messages = array();
     foreach ($lines as $line) {

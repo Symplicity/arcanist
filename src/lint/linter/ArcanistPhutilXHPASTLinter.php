@@ -5,14 +5,32 @@
  */
 final class ArcanistPhutilXHPASTLinter extends ArcanistBaseXHPASTLinter {
 
-  const LINT_PHT_WITH_DYNAMIC_STRING = 1;
   const LINT_ARRAY_COMBINE           = 2;
+  const LINT_DEPRECATED_FUNCTION     = 3;
   const LINT_UNSAFE_DYNAMIC_STRING   = 4;
 
   private $xhpastLinter;
+  private $deprecatedFunctions = array();
+  private $dynamicStringFunctions = array();
+  private $dynamicStringClasses = array();
 
   public function setXHPASTLinter(ArcanistXHPASTLinter $linter) {
     $this->xhpastLinter = $linter;
+    return $this;
+  }
+
+  public function setDeprecatedFunctions($map) {
+    $this->deprecatedFunctions = $map;
+    return $this;
+  }
+
+  public function setDynamicStringFunctions($map) {
+    $this->dynamicStringFunctions = $map;
+    return $this;
+  }
+
+  public function setDynamicStringClasses($map) {
+    $this->dynamicStringClasses = $map;
     return $this;
   }
 
@@ -27,17 +45,17 @@ final class ArcanistPhutilXHPASTLinter extends ArcanistBaseXHPASTLinter {
 
   public function getLintNameMap() {
     return array(
-      self::LINT_PHT_WITH_DYNAMIC_STRING => 'Use of pht() on Dynamic String',
       self::LINT_ARRAY_COMBINE           => 'array_combine() Unreliable',
+      self::LINT_DEPRECATED_FUNCTION     => 'Use of Deprecated Function',
       self::LINT_UNSAFE_DYNAMIC_STRING   => 'Unsafe Usage of Dynamic String',
     );
   }
 
   public function getLintSeverityMap() {
     $warning = ArcanistLintSeverity::SEVERITY_WARNING;
-
     return array(
       self::LINT_ARRAY_COMBINE           => $warning,
+      self::LINT_DEPRECATED_FUNCTION     => $warning,
       self::LINT_UNSAFE_DYNAMIC_STRING   => $warning,
     );
   }
@@ -47,14 +65,19 @@ final class ArcanistPhutilXHPASTLinter extends ArcanistBaseXHPASTLinter {
   }
 
   public function getCacheVersion() {
-    return 1;
+    $version = '2';
+    $path = xhpast_get_binary_path();
+    if (Filesystem::pathExists($path)) {
+      $version .= '-'.md5_file($path);
+    }
+    return $version;
   }
 
-  public function willLintPaths(array $paths) {
-    $this->xhpastLinter->willLintPaths($paths);
+  protected function buildFutures(array $paths) {
+    return $this->xhpastLinter->buildFutures($paths);
   }
 
-  public function lintPath($path) {
+  protected function resolveFuture($path, Future $future) {
     $tree = $this->xhpastLinter->getXHPASTTreeForPath($path);
     if (!$tree) {
       return;
@@ -62,42 +85,31 @@ final class ArcanistPhutilXHPASTLinter extends ArcanistBaseXHPASTLinter {
 
     $root = $tree->getRootNode();
 
-    $this->lintPHT($root);
-    $this->lintArrayCombine($root);
-    $this->lintUnsafeDynamicString($root);
-  }
+    $method_codes = array(
+      'lintArrayCombine' => self::LINT_ARRAY_COMBINE,
+      'lintUnsafeDynamicString' => self::LINT_UNSAFE_DYNAMIC_STRING,
+      'lintDeprecatedFunctions' => self::LINT_DEPRECATED_FUNCTION,
+    );
 
-
-  private function lintPHT($root) {
-    $calls = $root->selectDescendantsOfType('n_FUNCTION_CALL');
-    foreach ($calls as $call) {
-      $name = $call->getChildByIndex(0)->getConcreteString();
-      if (strcasecmp($name, 'pht') != 0) {
-        continue;
+    foreach ($method_codes as $method => $codes) {
+      foreach ((array)$codes as $code) {
+        if ($this->isCodeEnabled($code)) {
+          call_user_func(array($this, $method), $root);
+          break;
+        }
       }
-
-      $parameters = $call->getChildOfType(1, 'n_CALL_PARAMETER_LIST');
-      if (!$parameters->getChildren()) {
-        continue;
-      }
-
-      $identifier = $parameters->getChildByIndex(0);
-      if ($identifier->isConstantString()) {
-        continue;
-      }
-
-      $this->raiseLintAtNode(
-        $call,
-        self::LINT_PHT_WITH_DYNAMIC_STRING,
-        "The first parameter of pht() can be only a scalar string, ".
-          "otherwise it can't be extracted.");
     }
   }
 
 
   private function lintUnsafeDynamicString($root) {
-    $safe = array(
+    $safe = $this->dynamicStringFunctions + array(
+      'pht' => 0,
+
       'hsprintf' => 0,
+      'jsprintf' => 0,
+
+      'hgsprintf' => 0,
 
       'csprintf' => 0,
       'vcsprintf' => 0,
@@ -117,8 +129,8 @@ final class ArcanistPhutilXHPASTLinter extends ArcanistBaseXHPASTLinter {
     $calls = $root->selectDescendantsOfType('n_FUNCTION_CALL');
     $this->lintUnsafeDynamicStringCall($calls, $safe);
 
-    $safe = array(
-      'execfuture' => 0,
+    $safe = $this->dynamicStringClasses + array(
+      'ExecFuture' => 0,
     );
 
     $news = $root->selectDescendantsOfType('n_NEW');
@@ -128,6 +140,10 @@ final class ArcanistPhutilXHPASTLinter extends ArcanistBaseXHPASTLinter {
   private function lintUnsafeDynamicStringCall(
     AASTNodeList $calls,
     array $safe) {
+
+    $safe = array_combine(
+      array_map('strtolower', array_keys($safe)),
+      $safe);
 
     foreach ($calls as $call) {
       $name = $call->getChildByIndex(0)->getConcreteString();
@@ -176,6 +192,29 @@ final class ArcanistPhutilXHPASTLinter extends ArcanistBaseXHPASTLinter {
             'arrays. Prefer to write array_combine(x, x) as array_fuse(x).');
         }
       }
+    }
+  }
+
+  private function lintDeprecatedFunctions($root) {
+    $map = $this->deprecatedFunctions + array(
+      'phutil_render_tag' =>
+        'The phutil_render_tag() function is deprecated and unsafe. '.
+        'Use phutil_tag() instead.',
+    );
+
+    $function_calls = $root->selectDescendantsOfType('n_FUNCTION_CALL');
+    foreach ($function_calls as $call) {
+      $name = $call->getChildByIndex(0)->getConcreteString();
+
+      $name = strtolower($name);
+      if (empty($map[$name])) {
+        continue;
+      }
+
+      $this->raiseLintAtNode(
+        $call,
+        self::LINT_DEPRECATED_FUNCTION,
+        $map[$name]);
     }
   }
 

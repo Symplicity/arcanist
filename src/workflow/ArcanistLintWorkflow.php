@@ -5,7 +5,7 @@
  *
  * @group workflow
  */
-class ArcanistLintWorkflow extends ArcanistBaseWorkflow {
+final class ArcanistLintWorkflow extends ArcanistBaseWorkflow {
 
   const RESULT_OKAY       = 0;
   const RESULT_WARNINGS   = 1;
@@ -81,6 +81,7 @@ EOTEXT
         'help' =>
           "With 'summary', show lint warnings in a more compact format. ".
           "With 'json', show lint warnings in machine-readable JSON format. ".
+          "With 'none', show no lint warnings. ".
           "With 'compiler', show lint warnings in suitable for your editor."
       ),
       'only-new' => array(
@@ -195,15 +196,11 @@ EOTEXT
     $engine = newv($engine, array());
     $this->engine = $engine;
     $engine->setWorkingCopy($working_copy);
-
-    if ($use_cache) {
-      $engine->setRepositoryVersion($this->getRepositoryVersion());
-    }
-
     $engine->setMinimumSeverity(
       $this->getArgument('severity', self::DEFAULT_SEVERITY));
 
     if ($use_cache) {
+      $engine->setRepositoryVersion($this->getRepositoryVersion());
       $cache = $this->readScratchJSONFile('lint-cache.json');
       $cache = idx($cache, $this->getCacheKey(), array());
       $cache = array_intersect_key($cache, array_flip($paths));
@@ -388,6 +385,11 @@ EOTEXT
       case 'summary':
         $renderer = new ArcanistLintSummaryRenderer();
         break;
+      case 'none':
+        $prompt_patches = false;
+        $apply_patches = $this->getArgument('apply-patches');
+        $renderer = new ArcanistLintNoneRenderer();
+        break;
       case 'compiler':
         $renderer = new ArcanistLintLikeCompilerRenderer();
         $prompt_patches = false;
@@ -484,6 +486,11 @@ EOTEXT
     }
 
     if ($failed) {
+      if ($failed instanceof ArcanistNoEffectException) {
+        if ($renderer instanceof ArcanistLintNoneRenderer) {
+          return 0;
+        }
+      }
       throw $failed;
     }
 
@@ -527,7 +534,8 @@ EOTEXT
         }
         $cached_path['repository_version'] = $this->getRepositoryVersion();
         foreach ($result->getMessages() as $message) {
-          if ($message->isUncacheable()) {
+          $granularity = $message->getGranularity();
+          if ($granularity == ArcanistLinter::GRANULARITY_GLOBAL) {
             continue;
           }
           if (!$message->isPatchApplied()) {

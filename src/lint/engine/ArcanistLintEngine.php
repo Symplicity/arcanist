@@ -185,10 +185,24 @@ abstract class ArcanistLintEngine {
     }
 
     $versions = array($this->getCacheVersion());
+
     foreach ($linters as $linter) {
       $linter->setEngine($this);
-      $versions[] = get_class($linter).':'.$linter->getCacheVersion();
+      $version = get_class($linter).':'.$linter->getCacheVersion();
+
+      $symbols = id(new PhutilSymbolLoader())
+        ->setType('class')
+        ->setName(get_class($linter))
+        ->selectSymbolsWithoutLoading();
+      $symbol = idx($symbols, 'class$'.get_class($linter));
+      if ($symbol) {
+        $version .= ':'.md5_file(
+          phutil_get_library_root($symbol['library']).'/'.$symbol['where']);
+      }
+
+      $versions[] = $version;
     }
+
     $this->cacheVersion = crc32(implode("\n", $versions));
 
     $this->stopped = array();
@@ -203,8 +217,6 @@ abstract class ArcanistLintEngine {
         }
         $paths = $linter->getPaths();
 
-        $cache_granularity = $linter->getCacheGranularity();
-
         foreach ($paths as $key => $path) {
           // Make sure each path has a result generated, even if it is empty
           // (i.e., the file has no lint messages).
@@ -215,19 +227,9 @@ abstract class ArcanistLintEngine {
           if (isset($this->cachedResults[$path][$this->cacheVersion])) {
             $cached_result = $this->cachedResults[$path][$this->cacheVersion];
 
-            switch ($cache_granularity) {
-              case ArcanistLinter::GRANULARITY_FILE:
-                $use_cache = true;
-                break;
-              case ArcanistLinter::GRANULARITY_DIRECTORY:
-              case ArcanistLinter::GRANULARITY_REPOSITORY:
-                $repository_version = idx($cached_result, 'repository_version');
-                $use_cache = ($this->repositoryVersion == $repository_version);
-                break;
-              default:
-                $use_cache = false;
-                break;
-            }
+            $use_cache = $this->shouldUseCache(
+              $linter->getCacheGranularity(),
+              idx($cached_result, 'repository_version'));
 
             if ($use_cache) {
               unset($paths[$key]);
@@ -241,14 +243,27 @@ abstract class ArcanistLintEngine {
         $paths = array_values($paths);
 
         if ($paths) {
-          $linter->willLintPaths($paths);
-          foreach ($paths as $path) {
-            $linter->willLintPath($path);
-            $linter->lintPath($path);
-            if ($linter->didStopAllLinters()) {
-              $this->stopped[$path] = $linter_name;
+          $profiler = PhutilServiceProfiler::getInstance();
+          $call_id = $profiler->beginServiceCall(array(
+            'type' => 'lint',
+            'linter' => $linter_name,
+            'paths' => $paths,
+          ));
+
+          try {
+            $linter->willLintPaths($paths);
+            foreach ($paths as $path) {
+              $linter->willLintPath($path);
+              $linter->lintPath($path);
+              if ($linter->didStopAllLinters()) {
+                $this->stopped[$path] = $linter_name;
+              }
             }
+          } catch (Exception $ex) {
+            $profiler->endServiceCall($call_id, array());
+            throw $ex;
           }
+          $profiler->endServiceCall($call_id, array());
         }
 
       } catch (Exception $ex) {
@@ -256,21 +271,17 @@ abstract class ArcanistLintEngine {
       }
     }
 
-    $this->didRunLinters($linters);
+    $exceptions += $this->didRunLinters($linters);
 
     foreach ($linters as $linter) {
-      $minimum = $this->minimumSeverity;
-      $cache_granularity = $linter->getCacheGranularity();
       foreach ($linter->getLintMessages() as $message) {
-        if (!ArcanistLintSeverity::isAtLeastAsSevere($message, $minimum)) {
+        if (!$this->isSeverityEnabled($message->getSeverity())) {
           continue;
         }
         if (!$this->isRelevantMessage($message)) {
           continue;
         }
-        if ($cache_granularity == ArcanistLinter::GRANULARITY_GLOBAL) {
-          $message->setUncacheable(true);
-        }
+        $message->setGranularity($linter->getCacheGranularity());
         $result = $this->getResultForPath($message->getPath());
         $result->addMessage($message);
       }
@@ -279,11 +290,17 @@ abstract class ArcanistLintEngine {
     if ($this->cachedResults) {
       foreach ($this->cachedResults as $path => $messages) {
         $messages = idx($messages, $this->cacheVersion, array());
+        $repository_version = idx($messages, 'repository_version');
         unset($messages['stopped']);
         unset($messages['repository_version']);
         foreach ($messages as $message) {
-          $this->getResultForPath($path)->addMessage(
-            ArcanistLintMessage::newFromDictionary($message));
+          $use_cache = $this->shouldUseCache(
+            idx($message, 'granularity'),
+            $repository_version);
+          if ($use_cache) {
+            $this->getResultForPath($path)->addMessage(
+              ArcanistLintMessage::newFromDictionary($message));
+          }
         }
       }
     }
@@ -316,6 +333,23 @@ abstract class ArcanistLintEngine {
     return $this->results;
   }
 
+  public function isSeverityEnabled($severity) {
+    $minimum = $this->minimumSeverity;
+    return ArcanistLintSeverity::isAtLeastAsSevere($severity, $minimum);
+  }
+
+  private function shouldUseCache($cache_granularity, $repository_version) {
+    switch ($cache_granularity) {
+      case ArcanistLinter::GRANULARITY_FILE:
+        return true;
+      case ArcanistLinter::GRANULARITY_DIRECTORY:
+      case ArcanistLinter::GRANULARITY_REPOSITORY:
+        return ($this->repositoryVersion == $repository_version);
+      default:
+        return false;
+    }
+  }
+
   /**
    * @param dict<string path, dict<string version, list<dict message>>>
    * @return this
@@ -337,9 +371,29 @@ abstract class ArcanistLintEngine {
 
   protected function didRunLinters(array $linters) {
     assert_instances_of($linters, 'ArcanistLinter');
-    foreach ($linters as $linter) {
-      $linter->didRunLinters();
+
+    $exceptions = array();
+    $profiler = PhutilServiceProfiler::getInstance();
+
+    foreach ($linters as $linter_name => $linter) {
+      if (!is_string($linter_name)) {
+        $linter_name = get_class($linter);
+      }
+
+      $call_id = $profiler->beginServiceCall(array(
+        'type' => 'lint',
+        'linter' => $linter_name,
+      ));
+
+      try {
+        $linter->didRunLinters();
+      } catch (Exception $ex) {
+        $exceptions[$linter_name] = $ex;
+      }
+      $profiler->endServiceCall($call_id, array());
     }
+
+    return $exceptions;
   }
 
   public function setRepositoryVersion($version) {

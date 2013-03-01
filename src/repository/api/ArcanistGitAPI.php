@@ -101,7 +101,7 @@ final class ArcanistGitAPI extends ArcanistRepositoryAPI {
         : 'log %C --format=%s --',
       $against,
       // NOTE: "%B" is somewhat new, use "%s%n%n%b" instead.
-      '%H%x01%T%x01%P%x01%at%x01%an%x01%s%x01%s%n%n%b%x02');
+      '%H%x01%T%x01%P%x01%at%x01%an%x01%aE%x01%s%x01%s%n%n%b%x02');
 
     $commits = array();
 
@@ -112,8 +112,8 @@ final class ArcanistGitAPI extends ArcanistRepositoryAPI {
 
     $info = explode("\2", $info);
     foreach ($info as $line) {
-      list($commit, $tree, $parents, $time, $author, $title, $message)
-        = explode("\1", trim($line), 7);
+      list($commit, $tree, $parents, $time, $author, $author_email,
+        $title, $message) = explode("\1", trim($line), 8);
       $message = rtrim($message);
 
       $commits[$commit] = array(
@@ -124,6 +124,7 @@ final class ArcanistGitAPI extends ArcanistRepositoryAPI {
         'author'  => $author,
         'summary' => $title,
         'message' => $message,
+        'authorEmail' => $author_email,
       );
     }
 
@@ -974,9 +975,11 @@ final class ArcanistGitAPI extends ArcanistRepositoryAPI {
             list($err, $upstream) = $this->execManualLocal(
               "rev-parse --abbrev-ref --symbolic-full-name '@{upstream}'");
             if (!$err) {
+              $upstream = rtrim($upstream);
               list($upstream_merge_base) = $this->execxLocal(
                 'merge-base %s HEAD',
                 $upstream);
+              $upstream_merge_base = rtrim($upstream_merge_base);
               $this->setBaseCommitExplanation(
                 "it is the merge-base of the upstream of the current branch ".
                 "and HEAD, and matched the rule '{$rule}' in your {$source} ".

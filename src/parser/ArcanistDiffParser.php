@@ -365,7 +365,7 @@ final class ArcanistDiffParser {
    * (or any other parser) with a carefully constructed property change.
    */
   protected function parsePropertyHunk(ArcanistDiffChange $change) {
-    $line = $this->getLine();
+    $line = $this->getLineTrimmed();
     if (!preg_match('/^_+$/', $line)) {
       $this->didFailParse("Expected '______________________'.");
     }
@@ -377,10 +377,17 @@ final class ArcanistDiffParser {
         break;
       }
 
+      // NOTE: Before 1.5, SVN uses "Name". At 1.5 and later, SVN uses
+      // "Modified", "Added" and "Deleted".
+
       $matches = null;
-      $ok = preg_match('/^(Modified|Added|Deleted): (.*)$/', $line, $matches);
+      $ok = preg_match(
+        '/^(Name|Modified|Added|Deleted): (.*)$/',
+        $line,
+        $matches);
       if (!$ok) {
-        $this->didFailParse("Expected 'Added', 'Deleted', or 'Modified'.");
+        $this->didFailParse(
+          "Expected 'Name', 'Added', 'Deleted', or 'Modified'.");
       }
 
       $op = $matches[1];
@@ -1135,6 +1142,8 @@ final class ArcanistDiffParser {
       return;
     }
 
+    $imagechanges = array();
+
     $changes = $this->changes;
     foreach ($changes as $change) {
       $path = $change->getCurrentPath();
@@ -1176,8 +1185,22 @@ final class ArcanistDiffParser {
         continue;
       }
 
-      $change->setOriginalFileData($repository_api->getOriginalFileData($path));
-      $change->setCurrentFileData($repository_api->getCurrentFileData($path));
+      $imagechanges[$path] = $change;
+    }
+
+    // Fetch the actual file contents in batches so repositories
+    // that have slow random file accesses (i.e. mercurial) can
+    // optimize the retrieval.
+    $paths = array_keys($imagechanges);
+
+    $filedata = $repository_api->getBulkOriginalFileData($paths);
+    foreach ($filedata as $path => $data) {
+      $imagechanges[$path]->setOriginalFileData($data);
+    }
+
+    $filedata = $repository_api->getBulkCurrentFileData($paths);
+    foreach ($filedata as $path => $data) {
+      $imagechanges[$path]->setCurrentFileData($data);
     }
 
     $this->changes = $changes;
