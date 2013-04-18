@@ -370,7 +370,7 @@ abstract class ArcanistRepositoryAPI {
     throw new ArcanistCapabilityNotSupportedException($this);
   }
 
-  public function amendCommit($message) {
+  public function amendCommit($message = null) {
     throw new ArcanistCapabilityNotSupportedException($this);
   }
 
@@ -422,6 +422,17 @@ abstract class ArcanistRepositoryAPI {
 
   abstract protected function buildLocalFuture(array $argv);
 
+  public function canStashChanges() {
+    return false;
+  }
+
+  public function stashChanges() {
+    throw new ArcanistCapabilityNotSupportedException($this);
+  }
+
+  public function unstashChanges() {
+    throw new ArcanistCapabilityNotSupportedException($this);
+  }
 
 /* -(  Scratch Files  )------------------------------------------------------ */
 
