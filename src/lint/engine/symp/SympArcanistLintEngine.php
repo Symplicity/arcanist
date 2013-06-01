@@ -9,9 +9,9 @@ class SympArcanistLintEngine extends ArcanistLintEngine {
     $config = $project->getProjectConfig();
     if (isset($config['lint.phpcs.standard'])) {
       $xhpast_linter = new ArcanistPhpcsLinter();
-	} else {
+    } else {
       $xhpast_linter = new SympXHPASTLinter();
-	}
+    }
     $linters[] = $xhpast_linter;
     foreach ($paths as $path) {
       if (preg_match('/\.(php|class|inc)$/', $path)) {
