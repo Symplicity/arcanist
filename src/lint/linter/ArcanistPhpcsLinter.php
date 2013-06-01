@@ -90,15 +90,19 @@ final class ArcanistPhpcsLinter extends ArcanistLinter {
         "\nTry running lint with --trace flag to get more details.");
     }
 
+    $changed_lines = $this->getEngine()->getPathChangedLines($path);
     $files = $report_dom->getElementsByTagName('file');
+    $data = $this->getData($path);
+    $lines = explode("\n", $data);
     foreach ($files as $file) {
       foreach ($file->childNodes as $child) {
         if (!($child instanceof DOMElement)) {
           continue;
         }
+        if (($child->tagName != 'error') && !isset($changed_lines[$child->getAttribute('line')])) {
+          continue;
+        }
 
-        $data = $this->getData($path);
-        $lines = explode("\n", $data);
         $line = $lines[$child->getAttribute('line') - 1];
         $text = substr($line, $child->getAttribute('column') - 1);
         $name = $this->getLinterName() . ' - ' . $child->getAttribute('source');
