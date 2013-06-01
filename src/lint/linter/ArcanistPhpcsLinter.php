@@ -99,11 +99,12 @@ final class ArcanistPhpcsLinter extends ArcanistLinter {
         if (!($child instanceof DOMElement)) {
           continue;
         }
-        if (($child->tagName != 'error') && !isset($changed_lines[$child->getAttribute('line')])) {
+        $line_num = $child->getAttribute('line');
+        if (($child->tagName != 'error') && !isset($changed_lines[$line_num])) {
           continue;
         }
 
-        $line = $lines[$child->getAttribute('line') - 1];
+        $line = $lines[$line_num - 1];
         $text = substr($line, $child->getAttribute('column') - 1);
         $name = $this->getLinterName() . ' - ' . $child->getAttribute('source');
         $severity = $child->tagName == 'error' ?
@@ -112,7 +113,7 @@ final class ArcanistPhpcsLinter extends ArcanistLinter {
 
         $message = new ArcanistLintMessage();
         $message->setPath($path);
-        $message->setLine($child->getAttribute('line'));
+        $message->setLine($line_num);
         $message->setChar($child->getAttribute('column'));
         $message->setCode($child->getAttribute('severity'));
         $message->setName($name);
