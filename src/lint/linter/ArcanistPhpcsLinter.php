@@ -100,7 +100,7 @@ final class ArcanistPhpcsLinter extends ArcanistLinter {
           continue;
         }
         $line_num = $child->getAttribute('line');
-        if (($child->tagName != 'error') && !isset($changed_lines[$line_num])) {
+        if (($child->tagName != 'error') && count($changed_lines) && !isset($changed_lines[$line_num])) {
           continue;
         }
 
