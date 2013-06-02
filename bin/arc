@@ -18,4 +18,4 @@ while [ -h "$SOURCE" ]; do
 done;
 DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
 
-exec "$DIR/../scripts/arcanist.php" "$@"
+php -dauto_prepend_file="" "$DIR/../scripts/arcanist.php" "$@"
