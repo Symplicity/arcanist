@@ -155,7 +155,11 @@ final class ArcanistJSHintLinter extends ArcanistLinter {
         "stderr:\n\n{$stderr}");
     }
 
+    $changed_lines = $this->getEngine()->getPathChangedLines($path);
     foreach ($errors as $err) {
+      if (count($changed_lines) && !isset($changed_lines[$err->line])) {
+        continue;
+      }
       $this->raiseLintAtLine(
         $err->line,
         $err->col,
