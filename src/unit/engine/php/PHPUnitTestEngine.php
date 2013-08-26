@@ -31,8 +31,8 @@ class PHPUnitTestEngine extends ArcanistBaseUnitTestEngine {
     $tests = array();
     foreach ($this->getPaths() as $path) {
       $extension = substr($path, strrpos($path, '.'));
-      if (in_array($extension, array('.inc', '.class'))) {
-        $test = "./tests/" . str_replace(array('.class', '.inc'), 'Test.php', $path);
+      if (in_array($extension, array('.inc', '.class', '.php'))) {
+        $test = "./tests/" . str_replace(array('.class', '.inc', '.php'), 'Test.php', $path);
         if (file_exists($test)) {
           $tests[$path] = $test;
         } elseif (!preg_match('#include/(setup|config)|tools/tool_lib|formdefs|tests/#', $path)) {
