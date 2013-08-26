@@ -31,16 +31,18 @@ class PHPUnitTestEngine extends ArcanistBaseUnitTestEngine {
     $tests = array();
     foreach ($this->getPaths() as $path) {
       $extension = substr($path, strrpos($path, '.'));
-      if (in_array($extension, array('.inc', '.class', '.php'))) {
-        $test = "./tests/" . str_replace(array('.class', '.inc', '.php'), 'Test.php', $path);
-        if (file_exists($test)) {
-          $tests[$path] = $test;
-        } elseif (!preg_match('#include/(setup|config)|tools/tool_lib|formdefs|tests/#', $path)) {
-          $result = new ArcanistUnitTestResult();
-          $result->setName("Missing $test");
-          $result->setResult(ArcanistUnitTestResult::RESULT_FAIL);
-          $result->setUserData("         No tests found for $path");
-          $this->results[] = $result;
+      if (!preg_match('#include/(setup|config)|tests/#', $path)) {
+        if (in_array($extension, array('.inc', '.class', '.php'))) {
+          $test = "./tests/" . str_replace(array('.php', '.class', '.inc'), 'Test.php', $path);
+          if (file_exists($test)) {
+            $tests[$path] = $test;
+          } elseif (!preg_match('#tools/|formdefs/#', $path)) {
+            $result = new ArcanistUnitTestResult();
+            $result->setName("Missing $test");
+            $result->setResult(ArcanistUnitTestResult::RESULT_FAIL);
+            $result->setUserData("         No tests found for $path");
+            $this->results[] = $result;
+          }
         }
       }
     }
