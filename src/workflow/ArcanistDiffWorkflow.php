@@ -994,7 +994,7 @@ EOTEXT
             "{$byte_warning} If the file is not a text file, you can ".
             "mark it 'binary'. Mark this file as 'binary' and continue?";
           if (phutil_console_confirm($confirm)) {
-            $change->convertToBinaryChange();
+            $change->convertToBinaryChange($repository_api);
           } else {
             throw new ArcanistUsageException(
               "Aborted generation of gigantic diff.");
@@ -1080,7 +1080,7 @@ EOTEXT
         throw new ArcanistUsageException("Aborted workflow to fix UTF-8.");
       } else {
         foreach ($utf8_problems as $change) {
-          $change->convertToBinaryChange();
+          $change->convertToBinaryChange($repository_api);
         }
       }
     }
@@ -1397,6 +1397,16 @@ EOTEXT
 
   public function handleServerMessage(PhutilConsoleMessage $message) {
     $data = $message->getData();
+
+    if ($this->getArgument('excuse')) {
+      try {
+        phutil_console_require_tty();
+      } catch (PhutilConsoleStdinNotInteractiveException $ex) {
+        $this->excuses[$data['type']] = $this->getArgument('excuse');
+        return null;
+      }
+    }
+
     $response = '';
     if (isset($data['prompt'])) {
       $response = phutil_console_prompt($data['prompt'], idx($data, 'history'));
@@ -2104,6 +2114,12 @@ EOTEXT
 
     $messages = $repository_api->getCommitMessageLog();
 
+    if (count($messages) == 1) {
+      // If there's only one message, assume this is an amend-based workflow and
+      // that using it to prefill doesn't make sense.
+      return null;
+    }
+
     $local = $this->loadActiveLocalCommitInfo();
     $hashes = ipull($local, null, 'commit');
 
@@ -2461,8 +2477,9 @@ EOTEXT
       $change->setMetadata("{$type}:file:size", $size);
       if ($spec['data'] === null) {
         // This covers the case where a file was added or removed; we don't
-        // need to upload it. (This is distinct from an empty file, which we
-        // do upload.)
+        // need to upload the other half of it (e.g., the old file data for
+        // a file which was just added). This is distinct from an empty
+        // file, which we do upload.
         unset($need_upload[$key]);
         continue;
       }
@@ -2539,7 +2556,8 @@ EOTEXT
         $change->setMetadata("{$type}:binary-phid", $phid);
         echo pht("Uploaded '%s' (%s).", $name, $type)."\n";
       } catch (Exception $e) {
-        echo "Failed to upload {$type} binary '{$name}'.\n";
+        echo "Failed to upload {$type} binary '{$name}'.\n\n";
+        echo $e->getMessage()."\n";
         if (!phutil_console_confirm('Continue?', $default_no = false)) {
           throw new ArcanistUsageException(
             'Aborted due to file upload failure. You can use --skip-binaries '.

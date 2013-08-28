@@ -14,6 +14,7 @@
 final class PhpunitTestEngine extends ArcanistBaseUnitTestEngine {
 
   private $configFile;
+  private $phpunitBinary = 'phpunit';
   private $affectedTests;
   private $projectRoot;
 
@@ -57,6 +58,9 @@ final class PhpunitTestEngine extends ArcanistBaseUnitTestEngine {
     $futures = array();
     $tmpfiles = array();
     foreach ($this->affectedTests as $class_path => $test_path) {
+      if(!Filesystem::pathExists($test_path)) {
+        continue;
+      }
       $json_tmp = new TempFile();
       $clover_tmp = null;
       $clover = null;
@@ -67,8 +71,8 @@ final class PhpunitTestEngine extends ArcanistBaseUnitTestEngine {
 
       $config = $this->configFile ? csprintf('-c %s', $this->configFile) : null;
 
-      $futures[$test_path] = new ExecFuture('phpunit %C --log-json %s %C %s',
-        $config, $json_tmp, $clover, $test_path);
+      $futures[$test_path] = new ExecFuture('%C %C --log-json %s %C %s',
+        $this->phpunitBinary, $config, $json_tmp, $clover, $test_path);
       $tmpfiles[$test_path] = array(
         'json' => $json_tmp,
         'clover' => $clover_tmp,
@@ -82,7 +86,8 @@ final class PhpunitTestEngine extends ArcanistBaseUnitTestEngine {
 
       list($err, $stdout, $stderr) = $future->resolve();
 
-      $results[] = $this->parseTestResults($test_path,
+      $results[] = $this->parseTestResults(
+        $test,
         $tmpfiles[$test]['json'],
         $tmpfiles[$test]['clover']);
     }
@@ -259,6 +264,14 @@ final class PhpunitTestEngine extends ArcanistBaseUnitTestEngine {
       } else {
         throw new Exception('PHPUnit configuration file was not ' .
           'found in ' . $project_root . $config);
+      }
+    }
+    if ($bin = $this->getWorkingCopy()->getConfig('unit.phpunit.binary')) {
+      if (Filesystem::binaryExists($bin)) {
+        $this->phpunitBinary = $bin;
+      }
+      else {
+        $this->phpunitBinary = Filesystem::resolvePath($bin, $project_root);
       }
     }
   }

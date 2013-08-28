@@ -136,7 +136,7 @@ EOTEXT
               $command,
               $name);
           }
-        } catch (ConduitException $ex) {
+        } catch (ConduitClientException $ex) {
         }
       }
     }
@@ -179,9 +179,9 @@ EOTEXT
     foreach ($branches as $branch) {
       if ($repository_api instanceof ArcanistMercurialAPI) {
         $futures[$branch['name']] = $repository_api->execFutureLocal(
-          "log -l 1 --template '%C' -r %s",
+          "log -l 1 --template %s -r %s",
           "{node}\1{date|hgdate}\1{p1node}\1{desc|firstline}\1{desc}",
-          hgsprintf($branch['name']));
+          hgsprintf('%s', $branch['name']));
 
       } else {
         // NOTE: "-s" is an option deep in git's diff argument parser that
