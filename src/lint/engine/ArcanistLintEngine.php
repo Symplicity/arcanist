@@ -5,12 +5,12 @@
  * checks your .arcconfig to see if you have specified a lint engine in the
  * key "lint.engine". The engine must extend this class. For example:
  *
- *  lang=js
- *  {
- *    // ...
- *    "lint.engine" : "ExampleLintEngine",
- *    // ...
- *  }
+ *   lang=js
+ *   {
+ *     // ...
+ *     "lint.engine" : "ExampleLintEngine",
+ *     // ...
+ *   }
  *
  * The lint engine is given a list of paths (generally, the paths that you
  * modified in your change) and determines which linters to run on them. The
@@ -63,9 +63,20 @@ abstract class ArcanistLintEngine {
 
   private $enableAsyncLint = false;
   private $postponedLinters = array();
+  private $configurationManager;
 
   public function __construct() {
 
+  }
+
+  public function setConfigurationManager(
+    ArcanistConfigurationManager $configuration_manager) {
+    $this->configurationManager = $configuration_manager;
+    return $this;
+  }
+
+  public function getConfigurationManager() {
+    return $this->configurationManager;
   }
 
   public function setWorkingCopy(ArcanistWorkingCopyIdentity $working_copy) {

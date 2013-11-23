@@ -128,7 +128,7 @@ final class ArcanistSubversionAPI extends ArcanistRepositoryAPI {
 
       foreach ($files as $path => $mask) {
         foreach ($externals as $external) {
-          if (!strncmp($path, $external, strlen($external))) {
+          if (!strncmp($path . '/', $external . '/', strlen($external) + 1)) {
             $files[$path] |= self::FLAG_EXTERNALS;
           }
         }
@@ -390,7 +390,8 @@ final class ArcanistSubversionAPI extends ArcanistRepositoryAPI {
     // TODO: Move this to configuration?
     $matches = null;
     if (preg_match('/\.(gif|png|jpe?g|swf|pdf|ico)$/i', $path, $matches)) {
-      $mime = $this->getSVNProperty($path, 'svn:mime-type');
+      // Check if the file is deleted first; SVN will complain if we try to
+      // get properties of a deleted file.
       if ($status & ArcanistRepositoryAPI::FLAG_DELETED) {
         return <<<EODIFF
 Index: {$path}
@@ -400,6 +401,8 @@ svn:mime-type = application/octet-stream
 
 EODIFF;
       }
+
+      $mime = $this->getSVNProperty($path, 'svn:mime-type');
       if ($mime != 'application/octet-stream') {
         execx(
           'svn propset svn:mime-type application/octet-stream %s',

@@ -197,7 +197,7 @@ final class ArcanistGitAPI extends ArcanistRepositoryAPI {
     }
 
     if ($this->getBaseCommitArgumentRules() ||
-        $this->getWorkingCopyIdentity()->getConfigFromAnySource('base')) {
+        $this->getConfigurationManager()->getConfigFromAnySource('base')) {
       $base = $this->resolveBaseCommit();
       if (!$base) {
         throw new ArcanistUsageException(
@@ -212,7 +212,7 @@ final class ArcanistGitAPI extends ArcanistRepositoryAPI {
     $default_relative = null;
     $working_copy = $this->getWorkingCopyIdentity();
     if ($working_copy) {
-      $default_relative = $working_copy->getConfig(
+      $default_relative = $working_copy->getProjectConfig(
         'git.default-relative-commit');
       $this->setBaseCommitExplanation(
         "it is the merge-base of '{$default_relative}' and HEAD, as ".
@@ -473,13 +473,10 @@ final class ArcanistGitAPI extends ArcanistRepositoryAPI {
         'ls-files --others --exclude-standard',
       ));
 
-    // TODO: This doesn't list unstaged adds. It's not clear how to get that
-    // list other than "git status --porcelain" and then parsing it. :/
-
     // Unstaged changes
     $unstaged_future = $this->buildLocalFuture(
       array(
-        'ls-files -m',
+        'diff-files --name-only',
       ));
 
     $futures = array(
@@ -697,7 +694,7 @@ final class ArcanistGitAPI extends ArcanistRepositoryAPI {
     foreach ($lines as $line) {
       $matches = array();
       $ok = preg_match(
-        '/^(\d{6}) (blob|tree) ([a-z0-9]{40})[\t](.*)$/',
+        '/^(\d{6}) (blob|tree|commit) ([a-z0-9]{40})[\t](.*)$/',
         $line,
         $matches);
       if (!$ok) {

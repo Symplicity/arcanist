@@ -63,7 +63,21 @@ EOTEXT
     return array(
       'lintall' => array(
         'help' =>
-          "Show all lint warnings, not just those on changed lines."
+        "Show all lint warnings, not just those on changed lines.  When " .
+        "paths are specified, this is the default behavior.",
+        'conflicts' => array(
+          'only-changed' => true,
+        ),
+      ),
+      'only-changed' => array(
+        'help' =>
+        "Show lint warnings just on changed lines.  When no paths are " .
+        "specified, this is the default.  This differs from only-new " .
+        "in cases where line modifications introduce lint on other " .
+        "unmodified lines.",
+        'conflicts' => array(
+          'lintall' => true,
+        ),
       ),
       'rev' => array(
         'param' => 'revision',
@@ -168,10 +182,11 @@ EOTEXT
   public function run() {
     $console = PhutilConsole::getConsole();
     $working_copy = $this->getWorkingCopy();
+    $configuration_manager = $this->getConfigurationManager();
 
     $engine = $this->getArgument('engine');
     if (!$engine) {
-      $engine = $working_copy->getConfigFromAnySource('lint.engine');
+      $engine = $configuration_manager->getConfigFromAnySource('lint.engine');
     }
 
     if (!$engine) {
@@ -196,7 +211,7 @@ EOTEXT
         "flag lints every file.");
     }
     if ($use_cache === null) {
-      $use_cache = (bool)$working_copy->getConfigFromAnySource(
+      $use_cache = (bool)$configuration_manager->getConfigFromAnySource(
         'arc.lint.cache',
         false);
     }
@@ -205,12 +220,14 @@ EOTEXT
       throw new ArcanistUsageException("Specify either --rev or paths.");
     }
 
-    $this->shouldLintAll = $this->getArgument('lintall');
-    if ($paths) {
-      // NOTE: When the user specifies paths, we imply --lintall and show all
-      // warnings for the paths in question. This is easier to deal with for
-      // us and less confusing for users.
-      //$this->shouldLintAll = true;
+    // NOTE: When the user specifies paths, we imply --lintall and show all
+    // warnings for the paths in question. This is easier to deal with for
+    // us and less confusing for users.
+    $this->shouldLintAll = $paths ? true : false;
+    if ($this->getArgument('lintall')) {
+      $this->shouldLintAll = true;
+    } else if ($this->getArgument('only-changed')) {
+      $this->shouldLintAll = false;
     }
 
     if ($everything) {
@@ -244,6 +261,7 @@ EOTEXT
     $engine = newv($engine, array());
     $this->engine = $engine;
     $engine->setWorkingCopy($working_copy);
+    $engine->setConfigurationManager($configuration_manager);
     $engine->setMinimumSeverity(
       $this->getArgument('severity', self::DEFAULT_SEVERITY));
 

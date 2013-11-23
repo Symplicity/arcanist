@@ -242,8 +242,7 @@ EOTEXT
     $this->branch = head($branch);
     $this->keepBranch = $this->getArgument('keep-branch');
 
-    $working_copy = $this->getWorkingCopy();
-    $update_strategy = $working_copy->getConfigFromAnySource(
+    $update_strategy = $this->getConfigFromAnySource(
       'arc.land.update.default',
       'merge');
     $this->shouldUpdateWithRebase = $update_strategy == 'rebase';
@@ -261,7 +260,7 @@ EOTEXT
 
     $onto_default = $this->isGit ? 'master' : 'default';
     $onto_default = nonempty(
-      $working_copy->getConfigFromAnySource('arc.land.onto.default'),
+      $this->getConfigFromAnySource('arc.land.onto.default'),
       $onto_default);
     $this->onto = $this->getArgument('onto', $onto_default);
     $this->ontoType = $this->getBranchType($this->onto);
@@ -858,23 +857,23 @@ EOTEXT
   private function push() {
     $repository_api = $this->getRepositoryAPI();
 
-    if ($this->isGit) {
-      $repository_api->execxLocal(
-        'commit -F %s',
-        $this->messageFile);
-    } else if ($this->isHg) {
-      // hg rebase produces a commit earlier as part of rebase
-      if (!$this->useSquash) {
-        $repository_api->execxLocal(
-          'commit --logfile %s',
-          $this->messageFile);
-      }
-    }
-
-    // We dispatch this event so we can run checks on the merged revision, right
-    // before it gets pushed out. It's easier to do this in arc land than to
-    // try to hook into git/hg.
+    // these commands can fail legitimately (e.g. commit hooks)
     try {
+      if ($this->isGit) {
+        $repository_api->execxLocal(
+          'commit -F %s',
+          $this->messageFile);
+      } else if ($this->isHg) {
+        // hg rebase produces a commit earlier as part of rebase
+        if (!$this->useSquash) {
+          $repository_api->execxLocal(
+            'commit --logfile %s',
+            $this->messageFile);
+        }
+      }
+      // We dispatch this event so we can run checks on the merged revision,
+      // right before it gets pushed out. It's easier to do this in arc land
+      // than to try to hook into git/hg.
       $this->dispatchEvent(
         ArcanistEventType::TYPE_LAND_WILLPUSHREVISION,
         array());
@@ -1064,6 +1063,10 @@ EOTEXT
     $repository_api->execxLocal(
       'checkout %s',
       $this->oldBranch);
+    if ($this->isGit) {
+      $repository_api->execxLocal(
+        'submodule update --init --recursive');
+    }
     echo phutil_console_format(
       "Switched back to {$this->branchType} **%s**.\n",
       $this->oldBranch);
