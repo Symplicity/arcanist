@@ -217,6 +217,7 @@ EOTEXT
           $change->getNewProperties());
         break;
       case 'svn-binary-diff.svndiff':
+      case 'svn-binary-diff-freebsd.svndiff':
         $this->assertEqual(1, count($changes));
         $change = reset($changes);
         $this->assertEqual(
@@ -569,6 +570,11 @@ EOTEXT
         $this->assertEqual(
           ArcanistDiffChangeType::TYPE_CHANGE,
           $change->getType());
+        break;
+      case 'svnlook-basics.svndiff':
+      case 'svnlook-add.svndiff':
+      case 'svnlook-delete.svndiff':
+        $this->assertEqual(1, count($changes));
         break;
       default:
         throw new Exception("No test block for diff file {$diff_file}.");

@@ -207,6 +207,8 @@ final class ArcanistDiffParser {
       $patterns = array(
         // This is a normal SVN text change, probably from "svn diff".
         '(?P<type>Index): (?P<cur>.+)',
+        // This is an SVN text change, probably from "svnlook diff".
+        '(?P<type>Modified|Added|Deleted): (?P<cur>.+)',
         // This is an SVN property change, probably from "svn diff".
         '(?P<type>Property changes on): (?P<cur>.+)',
         // This is a git commit message, probably from "git show".
@@ -218,7 +220,7 @@ final class ArcanistDiffParser {
         '(?P<type>rcsdiff -u) (?P<oldnew>.*)',
         // This is a unified diff, probably from "diff -u" or synthetic diffing.
         '(?P<type>---) (?P<old>.+)\s+\d{4}-\d{2}-\d{2}.*',
-        '(?P<binary>Binary) files '.
+        '(?P<binary>Binary files|Files) '.
           '(?P<old>.+)\s+\d{4}-\d{2}-\d{2} and '.
           '(?P<new>.+)\s+\d{4}-\d{2}-\d{2} differ.*',
         // This is a normal Mercurial text change, probably from "hg diff". It
@@ -285,6 +287,9 @@ final class ArcanistDiffParser {
 
       switch ($match['type']) {
         case 'Index':
+        case 'Modified':
+        case 'Added':
+        case 'Deleted':
           $this->parseIndexHunk($change);
           break;
         case 'Property changes on':
@@ -700,7 +705,7 @@ final class ArcanistDiffParser {
     // We can get this in git, or in SVN when a file exists in the repository
     // WITHOUT a binary mime-type and is changed and given a binary mime-type.
     $is_binary_diff = preg_match(
-      '/^Binary files .* and .* differ$/',
+      '/^(Binary files|Files) .* and .* differ$/',
       rtrim($line));
     if ($is_binary_diff) {
       $this->nextNonemptyLine(); // Binary files x and y differ
