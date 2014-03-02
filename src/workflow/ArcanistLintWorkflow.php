@@ -223,7 +223,7 @@ EOTEXT
     // NOTE: When the user specifies paths, we imply --lintall and show all
     // warnings for the paths in question. This is easier to deal with for
     // us and less confusing for users.
-    $this->shouldLintAll = $paths ? true : false;
+    $this->shouldLintAll = false; // Symplicity disagrees with the above
     if ($this->getArgument('lintall')) {
       $this->shouldLintAll = true;
     } else if ($this->getArgument('only-changed')) {
