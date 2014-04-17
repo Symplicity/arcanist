@@ -17,11 +17,17 @@ class SympArcanistLintEngine extends ArcanistLintEngine {
       $js_linter = new ArcanistJSHintLinter();
       $linters[] = $js_linter;
     }
+    if (file_exists('.csslintrc')) {
+      $css_linter = new ArcanistCSSLintLinter();
+      $linters[] = $css_linter;
+    }
 
     foreach ($paths as $path) {
       $linter = null;
       if (preg_match('/\.(php|class|inc)$/', $path)) {
         $linter = $php_linter;
+      } elseif (isset($css_linter) && preg_match('/\.css$/', $path)) {
+        $linter = $css_linter;
       } elseif (isset($js_linter) && preg_match('/\.js$/', $path)) {
         $linter = $js_linter;
       }
