@@ -1,9 +1,7 @@
 <?php
 
 /**
- * Updates git commit messages after a revision is "Accepted".
- *
- * @group workflow
+ * Synchronizes commit messages from Differential.
  */
 final class ArcanistAmendWorkflow extends ArcanistBaseWorkflow {
 
@@ -21,8 +19,8 @@ EOTEXT
   public function getCommandHelp() {
     return phutil_console_format(<<<EOTEXT
           Supports: git, hg
-          Amend the working copy after a revision has been accepted, so commits
-          can be marked 'committed' and pushed upstream.
+          Amend the working copy, synchronizing the local commit message from
+          Differential.
 
           Supported in Mercurial 2.2 and newer.
 EOTEXT
@@ -48,14 +46,16 @@ EOTEXT
   public function getArguments() {
     return array(
       'show' => array(
-        'help' =>
-          "Show the amended commit message, without modifying the working copy."
+        'help' => pht(
+          'Show the amended commit message, without modifying the '.
+          'working copy.'),
       ),
       'revision' => array(
         'param' => 'revision_id',
-        'help' =>
-          "Amend a specific revision. If you do not specify a revision, ".
-          "arc will look in the commit message at HEAD.",
+        'help' => pht(
+          'Use the message from a specific revision. If you do not specify '.
+          'a revision, arc will guess which revision is in the working '.
+          'copy.'),
       ),
     );
   }
@@ -75,9 +75,9 @@ EOTEXT
         throw new ArcanistUsageException(
           "This project is marked as adhering to a conservative history ".
           "mutability doctrine (having an immutable local history), which ".
-          "precludes amending commit messages. You can use 'arc merge' to ".
-          "merge feature branches instead.");
+          "precludes amending commit messages.");
       }
+
       if ($repository_api->getUncommittedChanges()) {
         throw new ArcanistUsageException(
           "You have uncommitted changes in this branch. Stage and commit (or ".
@@ -94,7 +94,6 @@ EOTEXT
     $in_working_copy = $repository_api->loadWorkingCopyDifferentialRevisions(
       $this->getConduit(),
       array(
-        'authors'   => array($this->getUserPHID()),
         'status'    => 'status-any',
       ));
     $in_working_copy = ipull($in_working_copy, null, 'id');
@@ -113,6 +112,24 @@ EOTEXT
         throw new ArcanistUsageException($message);
       } else {
         $revision_id = key($in_working_copy);
+        $revision = $in_working_copy[$revision_id];
+        if ($revision['authorPHID'] != $this->getUserPHID()) {
+          $other_author = $this->getConduit()->callMethodSynchronous(
+            'user.query',
+            array(
+              'phids' => array($revision['authorPHID']),
+            ));
+          $other_author = ipull($other_author, 'userName', 'phid');
+          $other_author = $other_author[$revision['authorPHID']];
+          $rev_title = $revision['title'];
+          $ok = phutil_console_confirm(
+            "You are amending the revision 'D{$revision_id}: {$rev_title}' ".
+            "but you are not the author. Amend this revision by ".
+            "{$other_author}?");
+          if (!$ok) {
+            throw new ArcanistUserAbortException();
+          }
+        }
       }
     }
 
@@ -166,19 +183,10 @@ EOTEXT
         "D{$revision_id}: {$revision_title}");
 
       $repository_api->amendCommit($message);
-
-      $mark_workflow = $this->buildChildWorkflow(
-        'close-revision',
-        array(
-          '--finalize',
-          $revision_id,
-        ));
-      $mark_workflow->run();
     }
 
     return 0;
   }
-
 
   protected function getSupportedRevisionControlSystems() {
     return array('git', 'hg');

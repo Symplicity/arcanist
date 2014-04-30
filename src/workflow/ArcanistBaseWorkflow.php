@@ -44,7 +44,6 @@ abstract class ArcanistBaseWorkflow extends Phobject {
   const AUTO_COMMIT_TITLE = 'Automatic commit by arc';
 
   private $commitMode = self::COMMIT_DISABLE;
-  private $shouldAmend;
 
   private $conduit;
   private $conduitURI;
@@ -63,6 +62,7 @@ abstract class ArcanistBaseWorkflow extends Phobject {
   private $command;
 
   private $stashed;
+  private $shouldAmend;
 
   private $projectInfo;
   private $repositoryInfo;
@@ -660,15 +660,17 @@ abstract class ArcanistBaseWorkflow extends Phobject {
                 '--'.head($corrected))."\n");
             $arg_key = head($corrected);
           } else {
-            throw new ArcanistUsageException(
-              "Unknown argument '{$arg_key}'. Try 'arc help'.");
+            throw new ArcanistUsageException(pht(
+              "Unknown argument '%s'. Try 'arc help'.",
+              $arg_key));
           }
         }
       } else if (!strncmp($arg, '-', 1)) {
         $arg_key = substr($arg, 1);
         if (empty($short_to_long_map[$arg_key])) {
-          throw new ArcanistUsageException(
-            "Unknown argument '{$arg_key}'. Try 'arc help'.");
+          throw new ArcanistUsageException(pht(
+            "Unknown argument '%s'. Try 'arc help'.",
+            $arg_key));
         }
         $arg_key = $short_to_long_map[$arg_key];
       } else {
@@ -681,8 +683,9 @@ abstract class ArcanistBaseWorkflow extends Phobject {
         $dict[$arg_key] = true;
       } else {
         if ($ii == count($args) - 1) {
-          throw new ArcanistUsageException(
-            "Option '{$arg}' requires a parameter.");
+          throw new ArcanistUsageException(pht(
+            "Option '%s' requires a parameter.",
+            $arg));
         }
         if (!empty($options['repeat'])) {
           $dict[$arg_key][] = $args[$ii + 1];
@@ -698,8 +701,9 @@ abstract class ArcanistBaseWorkflow extends Phobject {
         $dict[$more_key] = $more;
       } else {
         $example = reset($more);
-        throw new ArcanistUsageException(
-          "Unrecognized argument '{$example}'. Try 'arc help'.");
+        throw new ArcanistUsageException(pht(
+          "Unrecognized argument '%s'. Try 'arc help'.",
+          $example));
       }
     }
 
@@ -779,7 +783,7 @@ abstract class ArcanistBaseWorkflow extends Phobject {
     if ($this->stashed) {
       $api = $this->getRepositoryAPI();
       $api->unstashChanges();
-      echo "Restored stashed changes to the working directory.\n";
+      echo pht('Restored stashed changes to the working directory.') . "\n";
     }
   }
 
@@ -820,15 +824,18 @@ abstract class ArcanistBaseWorkflow extends Phobject {
           $api->addToCommit($untracked);
           $must_commit += array_flip($untracked);
         } else if ($this->commitMode == self::COMMIT_DISABLE) {
-          $prompt = "Do you want to continue without adding these files?";
-          if (!phutil_console_confirm($prompt, $default_no = false)) {
-            throw new ArcanistUserAbortException();
+          $prompt = $this->getAskForAddPrompt($untracked);
+          if (phutil_console_confirm($prompt)) {
+            throw new ArcanistUsageException(pht(
+              "Add these files and then run 'arc %s' again.",
+              $this->getWorkflowName()));
           }
         }
 
       }
     }
 
+    // NOTE: this is a subversion-only concept.
     $incomplete = $api->getIncompleteChanges();
     if ($incomplete) {
       throw new ArcanistUsageException(
@@ -907,7 +914,7 @@ abstract class ArcanistBaseWorkflow extends Phobject {
     }
 
     if ($must_commit) {
-      if ($this->shouldAmend) {
+      if ($this->getShouldAmend()) {
         $commit = head($api->getLocalCommitInformation());
         $api->amendCommit($commit['message']);
       } else if ($api->supportsLocalCommits()) {
@@ -920,7 +927,14 @@ abstract class ArcanistBaseWorkflow extends Phobject {
     }
   }
 
-  private function shouldAmend() {
+  private function getShouldAmend() {
+    if ($this->shouldAmend === null) {
+      $this->shouldAmend = $this->calculateShouldAmend();
+    }
+    return $this->shouldAmend;
+  }
+
+  private function calculateShouldAmend() {
     $api = $this->getRepositoryAPI();
 
     if ($this->isHistoryImmutable() || !$api->supportsAmend()) {
@@ -982,13 +996,15 @@ abstract class ArcanistBaseWorkflow extends Phobject {
     if ($this->commitMode == self::COMMIT_DISABLE) {
       return false;
     }
-    if ($this->shouldAmend === null) {
-      $this->shouldAmend = $this->shouldAmend();
-    }
     if ($this->commitMode == self::COMMIT_ENABLE) {
       return true;
     }
-    if ($this->shouldAmend) {
+    $prompt = $this->getAskForAddPrompt($files);
+    return phutil_console_confirm($prompt);
+  }
+
+  private function getAskForAddPrompt(array $files) {
+    if ($this->getShouldAmend()) {
       $prompt = pht(
         'Do you want to amend these files to the commit?',
         count($files));
@@ -997,7 +1013,7 @@ abstract class ArcanistBaseWorkflow extends Phobject {
         'Do you want to add these files to the commit?',
         count($files));
     }
-    return phutil_console_confirm($prompt);
+    return $prompt;
   }
 
   protected function loadDiffBundleFromConduit(
@@ -1108,10 +1124,10 @@ abstract class ArcanistBaseWorkflow extends Phobject {
     }
 
     if (empty($this->changeCache[$path])) {
-      if ($is_git) {
-        // This can legitimately occur under git if you make a change, "git
-        // commit" it, and then revert the change in the working copy and run
-        // "arc lint".
+      if ($is_git || $is_hg) {
+        // This can legitimately occur under git/hg if you make a change,
+        // "git/hg commit" it, and then revert the change in the working copy
+        // and run "arc lint".
         $change = new ArcanistDiffChange();
         $change->setCurrentPath($path);
         return $change;
@@ -1532,7 +1548,7 @@ abstract class ArcanistBaseWorkflow extends Phobject {
 
   /**
    * Get the PHID of the Phabricator repository this working copy corresponds
-   * to. Returns `null` no repository can be identified.
+   * to. Returns `null` if no repository can be identified.
    *
    * @return phid|null  Repository PHID, or null if no repository can be
    *                    identified.
@@ -1546,7 +1562,7 @@ abstract class ArcanistBaseWorkflow extends Phobject {
 
   /**
    * Get the callsign of the Phabricator repository this working copy
-   * corresponds to. Returns `null` no repository can be identified.
+   * corresponds to. Returns `null` if no repository can be identified.
    *
    * @return string|null  Repository callsign, or null if no repository can be
    *                      identified.
@@ -1555,6 +1571,20 @@ abstract class ArcanistBaseWorkflow extends Phobject {
    */
   protected function getRepositoryCallsign() {
     return idx($this->getRepositoryInformation(), 'callsign');
+  }
+
+
+  /**
+   * Get the URI of the Phabricator repository this working copy
+   * corresponds to. Returns `null` if no repository can be identified.
+   *
+   * @return string|null  Repository URI, or null if no repository can be
+   *                      identified.
+   *
+   * @task phabrep
+   */
+  protected function getRepositoryURI() {
+    return idx($this->getRepositoryInformation(), 'uri');
   }
 
 

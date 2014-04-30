@@ -265,7 +265,7 @@ EOTEXT
 
       list($err) = $repository_api->execManualLocal(
         'log -r %s',
-        $proposed_name);
+        hgsprintf('%s', $proposed_name));
 
       // no error means hg log found a bookmark
       if (!$err) {
@@ -296,6 +296,8 @@ EOTEXT
       $base_revision = $bundle->getBaseRevision();
 
       if ($base_revision && $has_base_revision) {
+        $base_revision = $repository_api->getCanonicalRevisionName(
+          $base_revision);
         $repository_api->execxLocal(
           'checkout -b %s %s',
           $branch_name,

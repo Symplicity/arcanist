@@ -178,7 +178,6 @@ EOTEXT
 
     $working_copy = ArcanistWorkingCopyIdentity::newFromRootAndConfigFile(
       $project_root,
-      $this->getConfigurationManager(),
       $config,
       $config_file." (svnlook: {$transaction} {$repository})");
 
@@ -194,6 +193,7 @@ EOTEXT
 
     $engine = newv($lint_engine, array());
     $engine->setWorkingCopy($working_copy);
+    $engine->setConfigurationManager($this->getConfigurationManager());
     $engine->setMinimumSeverity(ArcanistLintSeverity::SEVERITY_ERROR);
     $engine->setPaths($paths);
     $engine->setCommitHookMode(true);
