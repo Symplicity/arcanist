@@ -96,7 +96,8 @@ EOTEXT
           "With 'summary', show lint warnings in a more compact format. ".
           "With 'json', show lint warnings in machine-readable JSON format. ".
           "With 'none', show no lint warnings. ".
-          "With 'compiler', show lint warnings in suitable for your editor."
+          "With 'compiler', show lint warnings in suitable for your editor. ".
+          "With 'xml', show lint warnings in the Checkstyle XML format."
       ),
       'only-new' => array(
         'param' => 'bool',
@@ -184,22 +185,7 @@ EOTEXT
     $working_copy = $this->getWorkingCopy();
     $configuration_manager = $this->getConfigurationManager();
 
-    $engine = $this->getArgument('engine');
-    if (!$engine) {
-      $engine = $configuration_manager->getConfigFromAnySource('lint.engine');
-    }
-
-    if (!$engine) {
-      if (Filesystem::pathExists($working_copy->getProjectPath('.arclint'))) {
-        $engine = 'ArcanistConfigurationDrivenLintEngine';
-      }
-    }
-
-    if (!$engine) {
-      throw new ArcanistNoEngineException(
-        "No lint engine configured for this project. Edit '.arcconfig' to ".
-        "specify a lint engine, or create an '.arclint' file.");
-    }
+    $engine = $this->newLintEngine($this->getArgument('engine'));
 
     $rev = $this->getArgument('rev');
     $paths = $this->getArgument('paths');
@@ -251,17 +237,8 @@ EOTEXT
       $paths = $this->selectPathsForWorkflow($paths, $rev);
     }
 
-    if (!class_exists($engine) ||
-        !is_subclass_of($engine, 'ArcanistLintEngine')) {
-      throw new ArcanistUsageException(
-        "Configured lint engine '{$engine}' is not a subclass of ".
-        "'ArcanistLintEngine'.");
-    }
-
-    $engine = newv($engine, array());
     $this->engine = $engine;
-    $engine->setWorkingCopy($working_copy);
-    $engine->setConfigurationManager($configuration_manager);
+
     $engine->setMinimumSeverity(
       $this->getArgument('severity', self::DEFAULT_SEVERITY));
 
@@ -479,6 +456,11 @@ EOTEXT
         $prompt_patches = false;
         $apply_patches = $this->getArgument('apply-patches');
         break;
+      case 'xml':
+        $renderer = new ArcanistLintCheckstyleXMLRenderer();
+        $prompt_patches = false;
+        $apply_patches = $this->getArgument('apply-patches');
+        break;
       default:
         $renderer = new ArcanistLintConsoleRenderer();
         $renderer->setShowAutofixPatches($prompt_autofix_patches);
@@ -486,6 +468,7 @@ EOTEXT
     }
 
     $all_autofix = true;
+    $console->writeOut('%s', $renderer->renderPreamble());
 
     foreach ($results as $result) {
       $result_all_autofix = $result->isAllAutofix();
@@ -536,6 +519,8 @@ EOTEXT
         $file_hashes[$old_file] = md5_file($old_file);
       }
     }
+
+    $console->writeOut('%s', $renderer->renderPostamble());
 
     if ($wrote_to_disk && $this->shouldAmendChanges) {
       if ($this->shouldAmendWithoutPrompt ||
