@@ -1,5 +1,6 @@
 .DS_Store
 ._*
+.idea
 /src/.phutil_module_cache
 /src/extensions/*
 /docs/
