@@ -28,7 +28,7 @@ class SympArcanistLintEngine extends ArcanistLintEngine {
         $linter = $php_linter;
       } elseif (isset($css_linter) && preg_match('/\.css$/', $path)) {
         $linter = $css_linter;
-      } elseif (isset($js_linter) && preg_match('/\.js$/', $path)) {
+      } elseif (isset($js_linter) && preg_match('/\.(js|json)$/', $path)) {
         $linter = $js_linter;
       }
       if ($linter) {
