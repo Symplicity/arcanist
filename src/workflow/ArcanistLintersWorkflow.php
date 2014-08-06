@@ -3,7 +3,7 @@
 /**
  * List available linters.
  */
-final class ArcanistLintersWorkflow extends ArcanistBaseWorkflow {
+final class ArcanistLintersWorkflow extends ArcanistWorkflow {
 
   public function getWorkflowName() {
     return 'linters';
@@ -43,7 +43,7 @@ EOTEXT
     try {
       $built = $this->newLintEngine()->buildLinters();
     } catch (ArcanistNoEngineException $ex) {
-      $built = $engine->buildLinters();
+      $built = array();
     }
 
     // Note that an engine can emit multiple linters of the same class to run

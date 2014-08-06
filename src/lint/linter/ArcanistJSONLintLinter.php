@@ -37,7 +37,7 @@ final class ArcanistJSONLintLinter extends ArcanistExternalLinter {
 
     $matches = array();
     if (preg_match('/^(?P<version>\d+\.\d+\.\d+)$/', $stdout, $matches)) {
-      $version = $matches['version'];
+      return $matches['version'];
     } else {
       return false;
     }
@@ -68,8 +68,8 @@ final class ArcanistJSONLintLinter extends ArcanistExternalLinter {
     foreach ($lines as $line) {
       $matches = null;
       $match = preg_match(
-        '/^(?:(?<path>.+): )?' .
-        'line (?<line>\d+), col (?<column>\d+), ' .
+        '/^(?:(?<path>.+): )?'.
+        'line (?<line>\d+), col (?<column>\d+), '.
         '(?<description>.*)$/',
         $line,
         $matches);
@@ -93,4 +93,5 @@ final class ArcanistJSONLintLinter extends ArcanistExternalLinter {
 
     return $messages;
   }
+
 }

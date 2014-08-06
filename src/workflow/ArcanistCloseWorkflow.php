@@ -1,11 +1,9 @@
 <?php
 
 /**
- * Close a task
- *
- * @group workflow
+ * Close a task.
  */
-final class ArcanistCloseWorkflow extends ArcanistBaseWorkflow {
+final class ArcanistCloseWorkflow extends ArcanistWorkflow {
 
   private $tasks;
   private $statusOptions;
@@ -73,8 +71,9 @@ EOTEXT
       'status'  => array(
         'param' => 'status',
         'short' => 's',
-        'help'  => pht('Specify a new status. Valid status options can be '.
-                       'seen with the `list-statuses` argument.'),
+        'help'  => pht(
+          'Specify a new status. Valid status options can be '.
+          'seen with the `list-statuses` argument.'),
       ),
       'list-statuses' => array(
         'help' => 'Show available status options and exit.',
@@ -109,7 +108,7 @@ EOTEXT
     }
 
     foreach ($ids as $id) {
-      if (!preg_match("/^T?\d+$/", $id)) {
+      if (!preg_match('/^T?\d+$/', $id)) {
         echo "Invalid Task ID: {$id}.\n";
         return 1;
       }
@@ -125,7 +124,7 @@ EOTEXT
     return 0;
   }
 
-  private function closeTask($task_id, $status, $comment = "") {
+  private function closeTask($task_id, $status, $comment = '') {
     $conduit = $this->getConduit();
     $info = $conduit->callMethodSynchronous(
       'maniphest.info',

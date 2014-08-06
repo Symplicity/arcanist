@@ -141,7 +141,7 @@ abstract class P {
 
 function x() {
   $lib = $_SERVER['PHP_ROOT'].'/lib/titan/display/read/init.php';
-  require_once($lib);
+  require_once $lib;
   f(((($lib)))); // Tests for paren expressions.
   f(((($lub))));
 }
@@ -166,8 +166,15 @@ function strings() {
   echo "$b";
 }
 
+function catchy() {
+  try {
+    dangerous();
+  } catch (Exception $ex) {
+    $y->z();
+  }
+}
+
 ~~~~~~~~~~
-disabled:3:1
 error:30:3
 error:32:3
 error:38:3
@@ -185,3 +192,4 @@ error:125:3 Should only warn once in this function.
 error:146:8
 error:152:9
 error:166:9
+error:173:5

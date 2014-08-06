@@ -2,10 +2,8 @@
 
 /**
  * Installable as an SVN "pre-commit" hook.
- *
- * @group workflow
  */
-final class ArcanistSvnHookPreCommitWorkflow extends ArcanistBaseWorkflow {
+final class ArcanistSvnHookPreCommitWorkflow extends ArcanistWorkflow {
 
   public function getWorkflowName() {
     return 'svn-hook-pre-commit';
@@ -39,7 +37,6 @@ EOTEXT
   }
 
   public function run() {
-
     $svnargs = $this->getArgument('svnargs');
     $repository = $svnargs[0];
     $transaction = $svnargs[1];
@@ -215,7 +212,7 @@ EOTEXT
     }
 
     if ($failures) {
-      $at = "@";
+      $at = '@';
       $msg = phutil_console_format(
         "\n**LINT ERRORS**\n\n".
         "This changeset has lint errors. You must fix all lint errors before ".
@@ -225,7 +222,7 @@ EOTEXT
         "errors to disable lint for that file.\n\n");
       echo phutil_console_wrap($msg);
 
-      $renderer = new ArcanistLintConsoleRenderer();
+      $renderer = new ArcanistConsoleLintRenderer();
       foreach ($failures as $result) {
         echo $renderer->renderLintResult($result);
       }
@@ -234,4 +231,5 @@ EOTEXT
 
     return 0;
   }
+
 }

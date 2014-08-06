@@ -2,10 +2,9 @@
 
 /**
  * Lands a branch by rebasing, merging and amending it.
- *
- * @group workflow
  */
-final class ArcanistLandWorkflow extends ArcanistBaseWorkflow {
+final class ArcanistLandWorkflow extends ArcanistWorkflow {
+
   private $isGit;
   private $isGitSvn;
   private $isHg;
@@ -81,29 +80,31 @@ EOTEXT
     return array(
       'onto' => array(
         'param' => 'master',
-        'help' => pht('Land feature branch onto a branch other than the '.
-                      'default (\'master\' in git, \'default\' in hg). You '.
-                      'can change the default by setting '.
-                      '\'arc.land.onto.default\' with `arc set-config` or '.
-                      'for the entire project in .arcconfig.'),
+        'help' => pht(
+          "Land feature branch onto a branch other than the default ".
+          "('master' in git, 'default' in hg). You can change the default ".
+          "by setting 'arc.land.onto.default' with `arc set-config` or ".
+          "for the entire project in .arcconfig."),
       ),
       'hold' => array(
-        'help' => pht('Prepare the change to be pushed, but do not actually '.
-                      'push it.'),
+        'help' => pht(
+          'Prepare the change to be pushed, but do not actually push it.'),
       ),
       'keep-branch' => array(
-        'help' => pht('Keep the feature branch after pushing changes to the '.
-                      'remote (by default, it is deleted).'),
+        'help' => pht(
+          'Keep the feature branch after pushing changes to the '.
+          'remote (by default, it is deleted).'),
       ),
       'remote' => array(
         'param' => 'origin',
-        'help' => pht('Push to a remote other than the default (\'origin\' '.
-                      'in git).'),
+        'help' => pht(
+          "Push to a remote other than the default ('origin' in git)."),
       ),
       'merge' => array(
-        'help' => pht('Perform a --no-ff merge, not a --squash merge. If the '.
-                      'project is marked as having an immutable history, '.
-                      'this is the default behavior.'),
+        'help' => pht(
+          'Perform a --no-ff merge, not a --squash merge. If the project '.
+          'is marked as having an immutable history, this is the default '.
+          'behavior.'),
         'supports' => array(
           'git',
         ),
@@ -112,45 +113,45 @@ EOTEXT
         ),
       ),
       'squash' => array(
-        'help' => pht('Perform a --squash merge, not a --no-ff merge. If the '.
-                      'project is marked as having a mutable history, this '.
-                      'is the default behavior.'),
+        'help' => pht(
+          'Perform a --squash merge, not a --no-ff merge. If the project is '.
+          'marked as having a mutable history, this is the default behavior.'),
         'conflicts' => array(
           'merge' => '--merge and --squash are conflicting merge strategies.',
         ),
       ),
       'delete-remote' => array(
-        'help'      => pht('Delete the feature branch in the remote after '.
-                           'landing it.'),
+        'help' => pht(
+          'Delete the feature branch in the remote after landing it.'),
         'conflicts' => array(
           'keep-branch' => true,
         ),
       ),
       'update-with-rebase' => array(
-        'help'    => pht('When updating the feature branch, use rebase '.
-                         'instead of merge. This might make things work '.
-                         'better in some cases. Set arc.land.update.default '.
-                         'to \'rebase\' to make this the default.'),
+        'help' => pht(
+          "When updating the feature branch, use rebase instead of merge. ".
+          "This might make things work better in some cases. Set ".
+          "arc.land.update.default to 'rebase' to make this the default."),
         'conflicts' => array(
-          'merge' => pht('The --merge strategy does not update the feature '.
-                         'branch.'),
-          'update-with-merge' => pht('Cannot be used with '.
-                                     '--update-with-merge.'),
+          'merge' => pht(
+            'The --merge strategy does not update the feature branch.'),
+          'update-with-merge' => pht(
+            'Cannot be used with --update-with-merge.'),
         ),
         'supports' => array(
           'git',
         ),
       ),
       'update-with-merge' => array(
-        'help'    => pht('When updating the feature branch, use merge instead '.
-                         'of rebase. This is the default behavior. Setting '.
-                         'arc.land.update.default to \'merge\' can also be '.
-                         'used to make this the default.'),
+        'help' => pht(
+          "When updating the feature branch, use merge instead of rebase. ".
+          "This is the default behavior. Setting arc.land.update.default to ".
+          "'merge' can also be used to make this the default."),
         'conflicts' => array(
-          'merge' => pht('The --merge strategy does not update the feature '.
-                         'branch.'),
-          'update-with-rebase' => pht('Cannot be used with '.
-                                      '--update-with-rebase.'),
+          'merge' => pht(
+            'The --merge strategy does not update the feature branch.'),
+          'update-with-rebase' => pht(
+            'Cannot be used with --update-with-rebase.'),
         ),
         'supports' => array(
           'git',
@@ -158,12 +159,14 @@ EOTEXT
       ),
       'revision' => array(
         'param' => 'id',
-        'help'  => pht('Use the message from a specific revision, rather than '.
-                       'inferring the revision based on branch content.'),
+        'help' => pht(
+          'Use the message from a specific revision, rather than '.
+          'inferring the revision based on branch content.'),
       ),
       'preview' => array(
-        'help' => pht('Prints the commits that would be landed. Does not '.
-                      'actually modify or land the commits.'),
+        'help' => pht(
+          'Prints the commits that would be landed. Does not '.
+          'actually modify or land the commits.'),
       ),
       '*' => 'branch',
     );
@@ -213,6 +216,22 @@ EOTEXT
     echo pht('Done.'), "\n";
 
     return 0;
+  }
+
+  private function getUpstreamMatching($branch, $pattern) {
+    if ($this->isGit) {
+      $repository_api = $this->getRepositoryAPI();
+      list($err, $fullname) = $repository_api->execManualLocal(
+        'rev-parse --symbolic-full-name %s@{upstream}',
+        $branch);
+      if (!$err) {
+        $matches = null;
+        if (preg_match($pattern, $fullname, $matches)) {
+          return last($matches);
+        }
+      }
+    }
+    return null;
   }
 
   private function readArguments() {
@@ -272,10 +291,16 @@ EOTEXT
     $onto_default = nonempty(
       $this->getConfigFromAnySource('arc.land.onto.default'),
       $onto_default);
+    $onto_default = coalesce(
+      $this->getUpstreamMatching($this->branch, '/^refs\/heads\/(.+)$/'),
+      $onto_default);
     $this->onto = $this->getArgument('onto', $onto_default);
     $this->ontoType = $this->getBranchType($this->onto);
 
     $remote_default = $this->isGit ? 'origin' : '';
+    $remote_default = coalesce(
+      $this->getUpstreamMatching($this->onto, '/^refs\/remotes\/(.+?)\//'),
+      $remote_default);
     $this->remote = $this->getArgument('remote', $remote_default);
 
     if ($this->getArgument('merge')) {
@@ -309,7 +334,7 @@ EOTEXT
         $this->branch,
         $this->onto);
       if (!$this->isHistoryImmutable()) {
-        $message .= ' ' . pht("You may be able to 'arc amend' instead.");
+        $message .= ' '.pht("You may be able to 'arc amend' instead.");
       }
       throw new ArcanistUsageException($message);
     }
@@ -318,16 +343,17 @@ EOTEXT
       if ($this->useSquash) {
         if (!$repository_api->supportsRebase()) {
           throw new ArcanistUsageException(
-            pht("You must enable the rebase extension to use the --squash ".
-                "strategy."));
+            pht(
+              'You must enable the rebase extension to use the --squash '.
+              'strategy.'));
         }
       }
 
       if ($this->branchType != $this->ontoType) {
         throw new ArcanistUsageException(pht(
-          "Source %s is a %s but destination %s is a %s. When landing a ".
-          "%s, the destination must also be a %s. Use --onto to specify a %s, ".
-          "or set arc.land.onto.default in .arcconfig.",
+          'Source %s is a %s but destination %s is a %s. When landing a '.
+          '%s, the destination must also be a %s. Use --onto to specify a %s, '.
+          'or set arc.land.onto.default in .arcconfig.',
           $this->branch,
           $this->branchType,
           $this->onto,
@@ -361,7 +387,7 @@ EOTEXT
     }
 
     echo phutil_console_format(
-      pht("Switched to %s **%s**. Identifying and merging...",
+      pht('Switched to %s **%s**. Identifying and merging...',
           $this->branchType,
           $this->branch).
       "\n");
@@ -396,7 +422,7 @@ EOTEXT
     if (!trim($out)) {
       $this->restoreBranch();
       throw new ArcanistUsageException(
-          pht("No commits to land from %s.", $this->branch));
+          pht('No commits to land from %s.', $this->branch));
     }
 
     echo pht("The following commit(s) will be landed:\n\n%s", $out), "\n";
@@ -428,9 +454,9 @@ EOTEXT
 
     if (!count($revisions)) {
       throw new ArcanistUsageException(pht(
-        "arc can not identify which revision exists on %s '%s'. Update the '.
-        'revision with recent changes to synchronize the %s name and hashes, '.
-        'or use 'arc amend' to amend the commit message at HEAD, or use ".
+        "arc can not identify which revision exists on %s '%s'. Update the ".
+        "revision with recent changes to synchronize the %s name and hashes, ".
+        "or use 'arc amend' to amend the commit message at HEAD, or use ".
         "'--revision <id>' to select a revision explicitly.",
         $this->branchType,
         $this->branch,
@@ -506,7 +532,7 @@ EOTEXT
         if (!empty($open_dep_revs)) {
           $open_revs = array();
           foreach ($open_dep_revs as $id => $title) {
-            $open_revs[] = "    - D".$id.": ".$title;
+            $open_revs[] = '    - D'.$id.': '.$title;
           }
           $open_revs = implode("\n", $open_revs);
 
@@ -514,7 +540,7 @@ EOTEXT
                    "D{$rev_id}: {$rev_title}",
                    $open_revs);
 
-          $ok = phutil_console_confirm(pht("Continue anyway?"));
+          $ok = phutil_console_confirm(pht('Continue anyway?'));
           if (!$ok) {
             throw new ArcanistUserAbortException();
           }
@@ -570,8 +596,8 @@ EOTEXT
 
     } else if ($this->isHg) {
       echo phutil_console_format(pht(
-        "Updating **%s**...",
-        $this->onto) . "\n");
+        'Updating **%s**...',
+        $this->onto)."\n");
 
       try {
         list($out, $err) = $repository_api->execxLocal('pull');
@@ -597,7 +623,7 @@ EOTEXT
         // updated between Feb 1, 2012 and Mar 1, 2012 will have the
         // erroring version. Do a dumb test against stdout to check for this
         // possibility.
-        // See: https://github.com/facebook/phabricator/issues/101/
+        // See: https://github.com/phacility/phabricator/issues/101/
 
         // NOTE: Mercurial has translated versions, which translate this error
         // string. In a translated version, the string will be something else,
@@ -613,10 +639,10 @@ EOTEXT
         }
       }
 
-      // Pull succeeded.  Now make sure master is not on an outgoing change
+      // Pull succeeded. Now make sure master is not on an outgoing change
       if ($repository_api->supportsPhases()) {
         list($out) = $repository_api->execxLocal(
-          'log -r %s --template %s', $this->onto, "{phase}");
+          'log -r %s --template %s', $this->onto, '{phase}');
         if ($out != 'public') {
           $local_ahead_of_remote = true;
         }
@@ -655,7 +681,7 @@ EOTEXT
     if ($this->isGit) {
       if ($this->shouldUpdateWithRebase) {
         echo phutil_console_format(pht(
-          "Rebasing **%s** onto **%s**",
+          'Rebasing **%s** onto **%s**',
           $this->branch,
           $this->onto)."\n");
         $err = phutil_passthru('git rebase %s', $this->onto);
@@ -669,7 +695,7 @@ EOTEXT
         }
       } else {
         echo phutil_console_format(pht(
-          "Merging **%s** into **%s**",
+          'Merging **%s** into **%s**',
           $this->branch,
           $this->onto)."\n");
         $err = phutil_passthru(
@@ -687,7 +713,7 @@ EOTEXT
     } else if ($this->isHg) {
       $onto_tip = $repository_api->getCanonicalRevisionName($this->onto);
       $common_ancestor = $repository_api->getCanonicalRevisionName(
-        hgsprintf("ancestor(%s, %s)",
+        hgsprintf('ancestor(%s, %s)',
           $this->onto,
           $this->branch));
 
@@ -745,13 +771,13 @@ EOTEXT
       // function). So we're guaranteed to have onto as an ancestor of branch
       // when we use first((onto::branch)-onto) below.
       $branch_root = $repository_api->getCanonicalRevisionName(
-        hgsprintf("first((%s::%s)-%s)",
+        hgsprintf('first((%s::%s)-%s)',
           $this->onto,
           $this->branch,
           $this->onto));
 
       $branch_range = hgsprintf(
-        "(%s::%s)",
+        '(%s::%s)',
         $branch_root,
         $this->branch);
 
@@ -793,8 +819,8 @@ EOTEXT
 
       // check if the branch had children
       list($output) = $repository_api->execxLocal(
-        "log -r %s --template %s",
-        hgsprintf("children(%s)", $this->branch),
+        'log -r %s --template %s',
+        hgsprintf('children(%s)', $this->branch),
         '{node}\n');
 
       $child_branch_roots = phutil_split_lines($output, false);
@@ -849,7 +875,7 @@ EOTEXT
       $this->branch,
       $branch_range);
     list($alt_branches) = $repository_api->execxLocal(
-      "log --template %s -r %s",
+      'log --template %s -r %s',
       '{node}\n',
        $alt_branch_revset);
 
@@ -890,7 +916,7 @@ EOTEXT
         throw new ArcanistUserAbortException();
       } else {
         throw new ArcanistUsageException(
-          pht("Invalid choice. Aborting arc land."));
+          pht('Invalid choice. Aborting arc land.'));
       }
     }
   }
@@ -923,7 +949,7 @@ EOTEXT
       // The user should never reach this line, since --merge is
       // forbidden at the command line argument level.
       throw new ArcanistUsageException(pht(
-        "--merge is not currently supported for hg repos."));
+        '--merge is not currently supported for hg repos.'));
     }
   }
 
@@ -936,6 +962,12 @@ EOTEXT
         $repository_api->execxLocal(
           'commit -F %s',
           $this->messageFile);
+        if (phutil_is_windows()) {
+          // Occasionally on large repositories on Windows, Git can exit with
+          // an unclean working copy here. This prevents reverts from being
+          // pushed to the remote when this occurs.
+          $this->requireCleanWorkingCopy();
+        }
       } else if ($this->isHg) {
         // hg rebase produces a commit earlier as part of rebase
         if (!$this->useSquash) {
@@ -957,8 +989,8 @@ EOTEXT
 
     if ($this->getArgument('hold')) {
       echo phutil_console_format(pht(
-        "Holding change in **%s**: it has NOT been pushed yet.",
-        $this->onto). "\n");
+        'Holding change in **%s**: it has NOT been pushed yet.',
+        $this->onto)."\n");
     } else {
       echo pht('Pushing change...'), "\n\n";
 
@@ -966,13 +998,13 @@ EOTEXT
 
       if ($this->isGitSvn) {
         $err = phutil_passthru('git svn dcommit');
-        $cmd = "git svn dcommit";
+        $cmd = 'git svn dcommit';
       } else if ($this->isGit) {
         $err = phutil_passthru(
           'git push %s %s',
           $this->remote,
           $this->onto);
-        $cmd = "git push";
+        $cmd = 'git push';
       } else if ($this->isHgSvn) {
         // hg-svn doesn't support 'push -r', so we do a normal push
         // which hg-svn modifies to only push the current branch and
@@ -980,13 +1012,13 @@ EOTEXT
         $err = $repository_api->execPassthru(
           'push %s',
           $this->remote);
-        $cmd = "hg push";
+        $cmd = 'hg push';
       } else if ($this->isHg) {
         $err = $repository_api->execPassthru(
           'push -r %s %s',
           $this->onto,
           $this->remote);
-        $cmd = "hg push";
+        $cmd = 'hg push';
       }
 
       if ($err) {
@@ -1011,7 +1043,7 @@ EOTEXT
           $this->getConduit()->callMethodSynchronous(
             'diffusion.looksoon',
             array(
-              'callsign' => $this->getRepositoryCallsign(),
+              'callsigns' => array($this->getRepositoryCallsign()),
             ));
         } catch (ConduitClientException $ex) {
           // If we hit an exception, just ignore it. Likely, we are running
@@ -1066,12 +1098,12 @@ EOTEXT
         $this->branch);
     } else if ($this->isHg) {
       $common_ancestor = $repository_api->getCanonicalRevisionName(
-        hgsprintf("ancestor(%s,%s)",
+        hgsprintf('ancestor(%s,%s)',
           $this->onto,
           $this->branch));
 
       $branch_root = $repository_api->getCanonicalRevisionName(
-        hgsprintf("first((%s::%s)-%s)",
+        hgsprintf('first((%s::%s)-%s)',
           $common_ancestor,
           $this->branch,
           $common_ancestor));
@@ -1144,9 +1176,9 @@ EOTEXT
   private function getBranchType($branch) {
     $repository_api = $this->getRepositoryAPI();
     if ($this->isHg && $repository_api->isBookmark($branch)) {
-      return "bookmark";
+      return 'bookmark';
     }
-    return "branch";
+    return 'branch';
   }
 
   /**

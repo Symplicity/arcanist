@@ -5,6 +5,9 @@
  */
 final class ArcanistJSHintLinter extends ArcanistExternalLinter {
 
+  private $jshintignore;
+  private $jshintrc;
+
   public function getInfoName() {
     return 'JSHint';
   }
@@ -14,8 +17,7 @@ final class ArcanistJSHintLinter extends ArcanistExternalLinter {
   }
 
   public function getInfoDescription() {
-    return pht(
-      'Use `jshint` to detect issues with Javascript source files.');
+    return pht('Use `jshint` to detect issues with Javascript source files.');
   }
 
   public function getLinterName() {
@@ -29,6 +31,13 @@ final class ArcanistJSHintLinter extends ArcanistExternalLinter {
   protected function getDefaultMessageSeverity($code) {
     if (preg_match('/^W/', $code)) {
       return ArcanistLintSeverity::SEVERITY_WARNING;
+    } else if (preg_match('/^E043$/', $code)) {
+      // TODO: If JSHint encounters a large number of errors, it will quit
+      // prematurely and add an additional "Too Many Errors" error. Ideally, we
+      // should be able to pass some sort of `--force` option to `jshint`.
+      //
+      // See https://github.com/jshint/jshint/issues/180
+      return ArcanistLintSeverity::SEVERITY_DISABLED;
     } else {
       return ArcanistLintSeverity::SEVERITY_ERROR;
     }
@@ -46,11 +55,14 @@ final class ArcanistJSHintLinter extends ArcanistExternalLinter {
   }
 
   public function getVersion() {
-    list($stdout) = execx('%C --version', $this->getExecutableCommand());
+    // NOTE: `jshint --version` emits version information on stderr, not stdout.
+    list($stdout, $stderr) = execx(
+      '%C --version',
+      $this->getExecutableCommand());
 
     $matches = array();
     $regex = '/^jshint v(?P<version>\d+\.\d+\.\d+)$/';
-    if (preg_match($regex, $stdout, $matches)) {
+    if (preg_match($regex, $stderr, $matches)) {
       return $matches['version'];
     } else {
       return false;
@@ -74,9 +86,48 @@ final class ArcanistJSHintLinter extends ArcanistExternalLinter {
   }
 
   protected function getMandatoryFlags() {
-    return array(
-      '--reporter='.dirname(realpath(__FILE__)).'/reporter.js',
+    $options = array();
+
+    $options[] = '--reporter='.dirname(realpath(__FILE__)).'/reporter.js';
+
+    if ($this->jshintrc) {
+      $options[] = '--config='.$this->jshintrc;
+    }
+
+    if ($this->jshintignore) {
+      $options[] = '--exclude-path='.$this->jshintignore;
+    }
+
+    return $options;
+  }
+
+  public function getLinterConfigurationOptions() {
+    $options = array(
+      'jshint.jshintignore' => array(
+        'type' => 'optional string',
+        'help' => pht('Pass in a custom jshintignore file path.'),
+      ),
+      'jshint.jshintrc' => array(
+        'type' => 'optional string',
+        'help' => pht('Custom configuration file.'),
+      ),
     );
+
+    return $options + parent::getLinterConfigurationOptions();
+  }
+
+  public function setLinterConfigurationValue($key, $value) {
+    switch ($key) {
+      case 'jshint.jshintignore':
+        $this->jshintignore = $value;
+        return;
+
+      case 'jshint.jshintrc':
+        $this->jshintrc = $value;
+        return;
+    }
+
+    return parent::setLinterConfigurationValue($key, $value);
   }
 
   protected function getDefaultFlags() {
@@ -117,7 +168,6 @@ final class ArcanistJSHintLinter extends ArcanistExternalLinter {
       $message->setName('JSHint'.idx($err, 'code'));
       $message->setDescription(idx($err, 'reason'));
       $message->setSeverity($this->getLintMessageSeverity(idx($err, 'code')));
-      $message->setOriginalText(idx($err, 'evidence'));
 
       $messages[] = $message;
     }
@@ -138,4 +188,5 @@ final class ArcanistJSHintLinter extends ArcanistExternalLinter {
 
     return $code;
   }
+
 }

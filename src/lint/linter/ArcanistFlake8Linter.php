@@ -47,7 +47,7 @@ final class ArcanistFlake8Linter extends ArcanistExternalLinter {
     list($stdout) = execx('%C --version', $this->getExecutableCommand());
 
     $matches = array();
-    if (preg_match('/^(?P<version>\d+\.\d+\.\d+)\b/', $stdout, $matches)) {
+    if (preg_match('/^(?P<version>\d+\.\d+(?:\.\d+)?)\b/', $stdout, $matches)) {
       return $matches['version'];
     } else {
       return false;
@@ -71,7 +71,7 @@ final class ArcanistFlake8Linter extends ArcanistExternalLinter {
   }
 
   protected function parseLinterOutput($path, $err, $stdout, $stderr) {
-    $lines = phutil_split_lines($stdout, $retain_endings = false);
+    $lines = phutil_split_lines($stdout, false);
 
     $messages = array();
     foreach ($lines as $line) {
@@ -128,10 +128,10 @@ final class ArcanistFlake8Linter extends ArcanistExternalLinter {
           'Unrecognized lint message code "%s". Expected a valid flake8 '.
           'lint code like "%s", or "%s", or "%s", or "%s".',
           $code,
-          "E225",
-          "W291",
-          "F811",
-          "C901"));
+          'E225',
+          'W291',
+          'F811',
+          'C901'));
     }
 
     return $code;
