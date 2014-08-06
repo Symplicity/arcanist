@@ -6,7 +6,7 @@
  *
  * @group unit
  */
-class GenericXUnitTestEngine extends ArcanistBaseUnitTestEngine {
+class GenericXUnitTestEngine extends ArcanistUnitTestEngine {
     public function run() {
         $results = $this->runTests();
 
@@ -35,16 +35,16 @@ class GenericXUnitTestEngine extends ArcanistBaseUnitTestEngine {
 
         return $this->parseTestResults($path);
     }
-    
+
     public function parseTestResults($path) {
         $results = array();
-        
+
         foreach (glob($path."/*.xml") as $filename) {
             $parser = new ArcanistXUnitTestResultParser();
             $results[] = $parser->parseTestResults(
                 Filesystem::readFile($filename));
         }
-        
+
         return array_mergev($results);
     }
 
@@ -78,7 +78,7 @@ class GenericXUnitTestEngine extends ArcanistBaseUnitTestEngine {
 
         return $config;
     }
-    
+
     private function getConfiguredTestResultPath() {
         $key = 'unit.genericxunit.result_path';
         $config = $this->getConfigurationManager()

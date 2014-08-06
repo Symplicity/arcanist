@@ -5,7 +5,7 @@
  *
  * @group unitrun
  */
-class PHPUnitTestEngine extends ArcanistBaseUnitTestEngine {
+class PHPUnitTestEngine extends ArcanistUnitTestEngine {
 
   private $testDuration;
 
