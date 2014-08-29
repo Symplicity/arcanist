@@ -144,7 +144,13 @@ EOTEXT
       // If we fail, try to resolve them as paths.
 
       foreach ($things as $key => $path) {
-        $path = preg_replace('/:([0-9]+)$/', '$\1', $path);
+        $lines = null;
+        $parts = explode(':', $path);
+        if (count($parts) > 1) {
+          $lines = array_pop($parts);
+        }
+        $path = implode(':', $parts);
+
         $full_path = Filesystem::resolvePath($path);
 
         if (!$is_force && !Filesystem::pathExists($full_path)) {
@@ -165,7 +171,13 @@ EOTEXT
         }
 
         $base_uri = $this->getBaseURI();
-        $uris[] = $base_uri.$path;
+        $uri = $base_uri.$path;
+
+        if ($lines) {
+          $uri = $uri.'$'.$lines;
+        }
+
+        $uris[] = $uri;
       }
     } else {
       if ($things) {
