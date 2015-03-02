@@ -18,6 +18,9 @@ class PHPUnitTestEngine extends ArcanistUnitTestEngine {
       if (!preg_match('#include/(setup|config)|tests|features/#', $path)) {
         if (in_array($extension, array('.inc', '.class', '.php'))) {
           $test = "./tests/" . str_replace(array('.php', '.class', '.inc'), 'Test.php', $path);
+          if (strpos($path, 'src/') === 0) {
+            $test = str_replace('/src/', '/', $test);
+          }
           if (file_exists($test)) {
             $tests[$path] = $test;
           } elseif (!preg_match('#tools/|formdefs/|wwwdocs/api|Interface#', $path) && file_exists($path)) {
