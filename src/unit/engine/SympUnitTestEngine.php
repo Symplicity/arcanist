@@ -8,29 +8,32 @@
  */
 class SympUnitTestEngine extends ArcanistUnitTestEngine {
     public function run() {
-        $results = array_merge(
-            $this->runSpecificTests(),
-            $this->runTests()
-        );
-        return $results;
+        return $this->runSpecificTests();
     }
 
     private function runSpecificTests() {
         $results = array();
         $tests = array();
+        $non_specific = false;
         foreach ($this->getPaths() as $path) {
             $extension = substr($path, strrpos($path, '.'));
-            if ($extension === '.php' && preg_match('#src/#', $path)) {
-                $test = str_replace(array('src/', '.php'), array('test/spec/', 'Spec.php'), $path);
-                if (file_exists($test)) {
-                    $tests[] = $test;
-                } elseif (!preg_match('#tools/|Formdef/#', $path) && file_exists($path)) {
-                    $result = new ArcanistUnitTestResult();
-                    $result->setName("Missing $test");
-                    $result->setResult(ArcanistUnitTestResult::RESULT_FAIL);
-                    $result->setUserData("         No tests found for $path");
-                    $results[] = $result;
+            if ($extension === '.php') {
+                if (preg_match('#src/#', $path)) {
+                    $test = str_replace(array('src/', '.php'), array('test/spec/', 'Spec.php'), $path);
+                    if (file_exists($test)) {
+                        $tests[] = $test;
+                    } elseif (!preg_match('#tools/|Formdef/#', $path) && file_exists($path)) {
+                        $result = new ArcanistUnitTestResult();
+                        $result->setName("Missing $test");
+                        $result->setResult(ArcanistUnitTestResult::RESULT_FAIL);
+                        $result->setUserData("         No tests found for $path");
+                        $results[] = $result;
+                    }
+                } elseif (preg_match('#Spec.php$#', $path)) {
+                    $tests[] = $path;
                 }
+            } elseif ($extension === '.js') {
+                $non_specific = true;
             }
         }
 
@@ -43,6 +46,12 @@ class SympUnitTestEngine extends ArcanistUnitTestEngine {
         foreach ($tests as $key => $test) {
             exec("/www/composer/bin/phpspec --no-interaction run -fjunit $test > $path/spec$key-results.xml");
         }
+
+        if ($non_specific) {
+            $this->runTests();
+        }
+        $results = array_merge($results, $this->parseTestResults($path));
+
         return $results;
     }
 
@@ -60,8 +69,6 @@ class SympUnitTestEngine extends ArcanistUnitTestEngine {
                 throw $exc;
             }
         }
-
-        return $this->parseTestResults($path);
     }
 
     public function parseTestResults($path) {
