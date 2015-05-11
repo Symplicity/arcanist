@@ -209,6 +209,7 @@ phutil_register_library_map(array(
     'PhpunitResultParser' => 'unit/engine/PhpunitResultParser.php',
     'PhpunitTestEngine' => 'unit/engine/PhpunitTestEngine.php',
     'PHPUnitTestEngine' => 'unit/engine/php/PHPUnitTestEngine.php',
+    'SympUnitTestEngine' => 'unit/engine/SympUnitTestEngine.php',
     'PhutilUnitTestEngine' => 'unit/engine/PhutilUnitTestEngine.php',
     'PhutilUnitTestEngineTestCase' => 'unit/engine/__tests__/PhutilUnitTestEngineTestCase.php',
     'SympArcanistLintEngine' => 'lint/engine/symp/SympArcanistLintEngine.php',
