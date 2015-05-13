@@ -22,7 +22,7 @@ class SympUnitTestEngine extends ArcanistUnitTestEngine {
                     $test = str_replace(array('src/', '.php'), array('test/spec/', 'Spec.php'), $path);
                     if (file_exists($test)) {
                         $tests[] = $test;
-                    } elseif (!preg_match('#tools/|Formdef/#', $path) && file_exists($path)) {
+                    } elseif (!preg_match('#tools/|Formdef/|Listdef/#', $path) && file_exists($path)) {
                         $result = new ArcanistUnitTestResult();
                         $result->setName("Missing $test");
                         $result->setResult(ArcanistUnitTestResult::RESULT_FAIL);
