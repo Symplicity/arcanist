@@ -36,9 +36,9 @@ EOTEXT
   public function run() {
     $console = PhutilConsole::getConsole();
 
-    $linters = id(new PhutilSymbolLoader())
+    $linters = id(new PhutilClassMapQuery())
       ->setAncestorClass('ArcanistLinter')
-      ->loadObjects();
+      ->execute();
 
     try {
       $built = $this->newLintEngine()->buildLinters();
@@ -178,7 +178,7 @@ EOTEXT
     if (!$this->getArgument('verbose')) {
       $console->writeOut(
         "%s\n",
-        pht('(Run `arc linters --verbose` for more details.)'));
+        pht('(Run `%s` for more details.)', 'arc linters --verbose'));
     }
   }
 
@@ -191,8 +191,8 @@ EOTEXT
   private function getStatusMap() {
     $text_map = array(
       'configured' => pht('CONFIGURED'),
-      'available' => pht('AVAILABLE'),
-      'error' => pht('ERROR'),
+      'available'  => pht('AVAILABLE'),
+      'error'      => pht('ERROR'),
     );
 
     $sizes = array();

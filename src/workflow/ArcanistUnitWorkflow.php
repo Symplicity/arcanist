@@ -40,56 +40,61 @@ EOTEXT
     return array(
       'rev' => array(
         'param' => 'revision',
-        'help' => 'Run unit tests covering changes since a specific revision.',
+        'help' => pht(
+          'Run unit tests covering changes since a specific revision.'),
         'supports' => array(
           'git',
           'hg',
         ),
         'nosupport' => array(
-          'svn' => 'Arc unit does not currently support --rev in SVN.',
+          'svn' => pht(
+            'Arc unit does not currently support %s in SVN.',
+            '--rev'),
         ),
       ),
       'engine' => array(
         'param' => 'classname',
-        'help' =>
-          'Override configured unit engine for this project.',
+        'help' => pht('Override configured unit engine for this project.'),
       ),
       'coverage' => array(
-        'help' => 'Always enable coverage information.',
+        'help' => pht('Always enable coverage information.'),
         'conflicts' => array(
           'no-coverage' => null,
         ),
       ),
       'no-coverage' => array(
-        'help' => 'Always disable coverage information.',
+        'help' => pht('Always disable coverage information.'),
       ),
       'detailed-coverage' => array(
-        'help' => 'Show a detailed coverage report on the CLI. Implies '.
-                  '--coverage.',
+        'help' => pht(
+          'Show a detailed coverage report on the CLI. Implies %s.',
+          '--coverage'),
       ),
       'json' => array(
-        'help' => 'Report results in JSON format.',
+        'help' => pht('Report results in JSON format.'),
       ),
       'output' => array(
         'param' => 'format',
-        'help' =>
+        'help' => pht(
           "With 'full', show full pretty report (Default). ".
           "With 'json', report results in JSON format. ".
           "With 'ugly', use uglier (but more efficient) JSON formatting. ".
-          "With 'none', don't print results. ",
+          "With 'none', don't print results."),
         'conflicts' => array(
-          'json' => 'Only one output format allowed',
-          'ugly' => 'Only one output format allowed',
+          'json' => pht('Only one output format allowed'),
+          'ugly' => pht('Only one output format allowed'),
         ),
       ),
       'everything' => array(
-        'help' => 'Run every test.',
+        'help' => pht('Run every test.'),
         'conflicts' => array(
-          'rev' => '--everything runs all tests.',
+          'rev' => pht('%s runs all tests.', '--everything'),
         ),
       ),
       'ugly' => array(
-        'help' => 'With --json, use uglier (but more efficient) formatting.',
+        'help' => pht(
+          'With %s, use uglier (but more efficient) formatting.',
+          '--json'),
       ),
       '*' => 'paths',
     );
@@ -108,40 +113,26 @@ EOTEXT
   }
 
   public function run() {
-
     $working_copy = $this->getWorkingCopy();
-
-    $engine_class = $this->getArgument(
-      'engine',
-      $this->getConfigurationManager()->getConfigFromAnySource('unit.engine'));
-
-    if (!$engine_class) {
-      throw new ArcanistNoEngineException(
-        'No unit test engine is configured for this project. Edit .arcconfig '.
-        'to specify a unit test engine.');
-    }
 
     $paths = $this->getArgument('paths');
     $rev = $this->getArgument('rev');
     $everything = $this->getArgument('everything');
     if ($everything && $paths) {
       throw new ArcanistUsageException(
-        'You can not specify paths with --everything. The --everything '.
-        'flag runs every test.');
+        pht(
+          'You can not specify paths with %s. The %s flag runs every test.',
+          '--everything',
+          '--everything'));
     }
 
-    $paths = $this->selectPathsForWorkflow($paths, $rev);
-
-    if (!class_exists($engine_class) ||
-        !is_subclass_of($engine_class, 'ArcanistUnitTestEngine')) {
-      throw new ArcanistUsageException(
-        "Configured unit test engine '{$engine_class}' is not a subclass of ".
-        "'ArcanistUnitTestEngine'.");
+    if ($everything) {
+      $paths = iterator_to_array($this->getRepositoryApi()->getAllFiles());
+    } else {
+      $paths = $this->selectPathsForWorkflow($paths, $rev);
     }
 
-    $this->engine = newv($engine_class, array());
-    $this->engine->setWorkingCopy($working_copy);
-    $this->engine->setConfigurationManager($this->getConfigurationManager());
+    $this->engine = $this->newUnitTestEngine($this->getArgument('engine'));
     if ($everything) {
       $this->engine->setRunAllTests(true);
     } else {
@@ -169,6 +160,9 @@ EOTEXT
     }
 
     $results = $this->engine->run();
+
+    $this->validateUnitEngineResults($this->engine, $results);
+
     $this->testResults = $results;
 
     $console = PhutilConsole::getConsole();
@@ -224,7 +218,7 @@ EOTEXT
         $file_coverage[$file] = $coverage;
         $file_reports[$file] = $report;
       }
-      $console->writeOut("\n__COVERAGE REPORT__\n");
+      $console->writeOut("\n__%s__\n", pht('COVERAGE REPORT'));
 
       asort($file_coverage);
       foreach ($file_coverage as $file => $coverage) {
@@ -351,6 +345,44 @@ EOTEXT
       'full' => 'full',
     );
     return idx($known_formats, $format, 'full');
+  }
+
+
+  /**
+   * Raise a tailored error when a unit test engine returns results in an
+   * invalid format.
+   *
+   * @param ArcanistUnitTestEngine The engine.
+   * @param wild Results from the engine.
+   */
+  private function validateUnitEngineResults(
+    ArcanistUnitTestEngine $engine,
+    $results) {
+
+    if (!is_array($results)) {
+      throw new Exception(
+        pht(
+          'Unit test engine (of class "%s") returned invalid results when '.
+          'run (with method "%s"). Expected a list of "%s" objects as results.',
+          get_class($engine),
+          'run()',
+          'ArcanistUnitTestResult'));
+    }
+
+    foreach ($results as $key => $result) {
+      if (!($result instanceof ArcanistUnitTestResult)) {
+        throw new Exception(
+          pht(
+            'Unit test engine (of class "%s") returned invalid results when '.
+            'run (with method "%s"). Expected a list of "%s" objects as '.
+            'results, but value with key "%s" is not valid.',
+            get_class($engine),
+            'run()',
+            'ArcanistUnitTestResult',
+            $key));
+      }
+    }
+
   }
 
 }

@@ -19,7 +19,7 @@
  *
  * @concrete-extensible
  */
-class ArcanistConfiguration {
+class ArcanistConfiguration extends Phobject {
 
   public function buildWorkflow($command) {
     if ($command == '--help') {
@@ -35,25 +35,10 @@ class ArcanistConfiguration {
   }
 
   public function buildAllWorkflows() {
-    $workflows_by_name = array();
-
-    $workflows_by_class_name = id(new PhutilSymbolLoader())
+    return id(new PhutilClassMapQuery())
       ->setAncestorClass('ArcanistWorkflow')
-      ->loadObjects();
-    foreach ($workflows_by_class_name as $class => $workflow) {
-      $name = $workflow->getWorkflowName();
-
-      if (isset($workflows_by_name[$name])) {
-        $other = get_class($workflows_by_name[$name]);
-        throw new Exception(
-          "Workflows {$class} and {$other} both implement workflows named ".
-          "{$name}.");
-      }
-
-      $workflows_by_name[$name] = $workflow;
-    }
-
-    return $workflows_by_name;
+      ->setUniqueMethod('getWorkflowName')
+      ->execute();
   }
 
   final public function isValidWorkflow($workflow) {
@@ -109,7 +94,8 @@ class ArcanistConfiguration {
       $shell_cmd = substr($full_alias, 1);
 
       $console->writeLog(
-        "[alias: 'arc %s' -> $ %s]",
+        "[%s: 'arc %s' -> $ %s]",
+        pht('alias'),
         $command,
         $shell_cmd);
 
@@ -127,7 +113,8 @@ class ArcanistConfiguration {
       $workflow = $this->buildWorkflow($new_command);
       if ($workflow) {
         $console->writeLog(
-          "[alias: 'arc %s' -> 'arc %s']\n",
+          "[%s: 'arc %s' -> 'arc %s']\n",
+          pht('alias'),
           $command,
           $full_alias);
         $command = $new_command;
@@ -168,7 +155,7 @@ class ArcanistConfiguration {
   }
 
   private function raiseUnknownCommand($command, array $maybe = array()) {
-    $message = pht("Unknown command '%s'. Try 'arc help'.", $command);
+    $message = pht("Unknown command '%s'. Try '%s'.", $command, 'arc help');
     if ($maybe) {
       $message .= "\n\n".pht('Did you mean:')."\n";
       sort($maybe);
