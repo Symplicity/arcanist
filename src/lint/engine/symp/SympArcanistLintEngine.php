@@ -5,11 +5,9 @@ class SympArcanistLintEngine extends ArcanistLintEngine {
   public function buildLinters() {
     $paths = $this->getPaths();
     $project = $this->getWorkingCopy();
-    if ($project->getProjectConfig('lint.phpcs.standard')) {
-      $php_linter = new ArcanistPhpcsLinter();
-    } else {
-      $php_linter = new SympXHPASTLinter();
-    }
+    $php_linter = new ArcanistPhpcsLinter();
+    $php_linter->setBinary($project->getProjectConfig('lint.phpcs.bin'));
+    $php_linter->setLinterConfigurationValue('phpcs.standard', $project->getProjectConfig('lint.phpcs.standard'));
     $linters = array(
       $php_linter
     );
