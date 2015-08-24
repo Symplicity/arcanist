@@ -8,6 +8,8 @@
 class PHPUnitTestEngine extends ArcanistUnitTestEngine {
 
   private $testDuration;
+  protected $results;
+  protected $runningTest;
 
   public function run() {
 
