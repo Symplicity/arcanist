@@ -354,7 +354,7 @@ abstract class ArcanistExternalLinter extends ArcanistFutureLinter {
 
     $messages = $this->parseLinterOutput($path, $err, $stdout, $stderr);
 
-    if ($err && $this->shouldExpectCommandErrors() && ($messages === false)) {
+    if ($err && $this->shouldExpectCommandErrors() && !$messages) {
       // We assume that if the future exits with a non-zero status and we
       // failed to parse any linter messages, then something must've gone wrong
       // during parsing.

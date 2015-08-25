@@ -95,16 +95,11 @@ final class ArcanistPhpcsLinter extends ArcanistExternalLinter {
       return false;
     }
 
-    $changed_lines = $this->getEngine()->getPathChangedLines($path);
     $files = $report_dom->getElementsByTagName('file');
     $messages = array();
     foreach ($files as $file) {
       foreach ($file->childNodes as $child) {
         if (!($child instanceof DOMElement)) {
-          continue;
-        }
-        $line_num = $child->getAttribute('line');
-        if (($child->tagName != 'error') && count($changed_lines) && !isset($changed_lines[$line_num])) {
           continue;
         }
 
@@ -118,7 +113,7 @@ final class ArcanistPhpcsLinter extends ArcanistExternalLinter {
 
         $message = new ArcanistLintMessage();
         $message->setPath($path);
-        $message->setLine($line_num);
+        $message->setLine($child->getAttribute('line'));
         $message->setChar($child->getAttribute('column'));
         $message->setCode($code);
         $message->setDescription($child->nodeValue);
