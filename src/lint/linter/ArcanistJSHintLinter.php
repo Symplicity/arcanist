@@ -124,12 +124,8 @@ final class ArcanistJSHintLinter extends ArcanistExternalLinter {
         $ex);
     }
 
-    $changed_lines = $this->getEngine()->getPathChangedLines($path);
     $messages = array();
     foreach ($errors as $err) {
-      if (count($changed_lines) && !isset($changed_lines[idx($err, 'line')])) {
-        continue;
-      }
       $message = new ArcanistLintMessage();
       $message->setPath($path);
       $message->setLine(idx($err, 'line'));
