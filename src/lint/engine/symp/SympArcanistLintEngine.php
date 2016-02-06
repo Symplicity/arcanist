@@ -25,7 +25,10 @@ class SympArcanistLintEngine extends ArcanistLintEngine {
     foreach ($paths as $path) {
       $linter = null;
       if (preg_match('/\.(php|class|inc)$/', $path)) {
-        $linter = $php_linter;
+        if (!preg_match('#/spec/#', $path)) {
+          // specs are checked by the git hook, so until we can ignore PSR-1 skip them
+          $linter = $php_linter;
+        }
       } elseif (isset($css_linter) && preg_match('/\.css$/', $path)) {
         $linter = $css_linter;
       } elseif (isset($js_linter) && preg_match('/\.js$/', $path)) {
