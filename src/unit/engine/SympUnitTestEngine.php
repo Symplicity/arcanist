@@ -19,7 +19,7 @@ class SympUnitTestEngine extends ArcanistUnitTestEngine {
             $extension = substr($path, strrpos($path, '.'));
             if ($extension === '.php') {
                 if (preg_match('#src/#', $path)) {
-                    $test = str_replace(array('src/', '.php'), array('test/spec/', 'Spec.php'), $path);
+                    $test = str_replace(array('src/', '.php'), array('tests/spec/', 'Spec.php'), $path);
                     if (file_exists($test)) {
                         $tests[] = $test;
                     } elseif (!preg_match('#tools/|Formdef/|Listdef/#', $path) && file_exists($path)) {
