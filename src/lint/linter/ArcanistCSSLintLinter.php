@@ -69,8 +69,8 @@ final class ArcanistCSSLintLinter extends ArcanistExternalLinter {
       foreach ($file->childNodes as $child) {
         $message = id(new ArcanistLintMessage())
           ->setPath($path)
-          ->setLine($child->getAttribute('line'))
-          ->setChar($child->getAttribute('char'))
+          ->setLine(intval($child->getAttribute('line')))
+          ->setChar(intval($child->getAttribute('char')))
           ->setCode($this->getLinterName())
           ->setDescription($child->getAttribute('reason'))
           ->setOriginalText(
