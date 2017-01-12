@@ -36,7 +36,7 @@ final class ArcanistPhpLinter extends ArcanistExternalLinter {
   }
 
   protected function getMandatoryFlags() {
-    return array('-l');
+    return array('-l', '-ddisplay_errors=1');
   }
 
   public function getInstallInstructions() {
