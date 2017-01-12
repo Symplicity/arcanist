@@ -5,11 +5,13 @@ class SympArcanistLintEngine extends ArcanistLintEngine {
   public function buildLinters() {
     $paths = $this->getPaths();
     $project = $this->getWorkingCopy();
+    $php_syntax_linter = new ArcanistPhpLinter();
     $php_linter = new ArcanistPhpcsLinter();
     $php_linter->setBinary($project->getProjectConfig('lint.phpcs.bin'));
     $php_linter->setLinterConfigurationValue('phpcs.standard', $project->getProjectConfig('lint.phpcs.standard'));
     $linters = array(
-      $php_linter
+      $php_linter,
+      $php_syntax_linter
     );
     if ($project->getProjectConfig('lint.jshint.config')) {
       $js_linter = new ArcanistJSHintLinter();
@@ -29,6 +31,7 @@ class SympArcanistLintEngine extends ArcanistLintEngine {
           // specs are checked by the git hook, so until we can ignore PSR-1 skip them
           $linter = $php_linter;
         }
+        $php_syntax_linter->addPath($path);
       } elseif (isset($css_linter) && preg_match('/\.css$/', $path)) {
         $linter = $css_linter;
       } elseif (isset($js_linter) && preg_match('/\.js$/', $path)) {
